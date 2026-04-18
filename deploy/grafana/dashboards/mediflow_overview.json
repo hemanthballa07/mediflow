@@ -1,0 +1,91 @@
+{
+  "title": "MediFlow Overview",
+  "uid": "mediflow-overview",
+  "schemaVersion": 38,
+  "refresh": "10s",
+  "time": { "from": "now-30m", "to": "now" },
+  "panels": [
+    {
+      "id": 1, "type": "row", "title": "Traffic", "gridPos": {"h":1,"w":24,"x":0,"y":0}
+    },
+    {
+      "id": 2, "type": "timeseries", "title": "Request Rate (req/s)",
+      "gridPos": {"h":7,"w":12,"x":0,"y":1},
+      "targets": [{
+        "expr": "sum(rate(mediflow_http_requests_total[1m]))",
+        "legendFormat": "req/s"
+      }]
+    },
+    {
+      "id": 3, "type": "timeseries", "title": "p50 / p95 / p99 Latency (ms)",
+      "gridPos": {"h":7,"w":12,"x":12,"y":1},
+      "targets": [
+        {"expr": "histogram_quantile(0.50, sum(rate(mediflow_http_request_duration_seconds_bucket[1m])) by (le)) * 1000", "legendFormat": "p50"},
+        {"expr": "histogram_quantile(0.95, sum(rate(mediflow_http_request_duration_seconds_bucket[1m])) by (le)) * 1000", "legendFormat": "p95"},
+        {"expr": "histogram_quantile(0.99, sum(rate(mediflow_http_request_duration_seconds_bucket[1m])) by (le)) * 1000", "legendFormat": "p99"}
+      ]
+    },
+    {
+      "id": 4, "type": "row", "title": "Bookings & Conflicts", "gridPos": {"h":1,"w":24,"x":0,"y":8}
+    },
+    {
+      "id": 5, "type": "stat", "title": "Bookings Created",
+      "gridPos": {"h":4,"w":6,"x":0,"y":9},
+      "targets": [{"expr": "mediflow_bookings_created_total", "legendFormat": "total"}]
+    },
+    {
+      "id": 6, "type": "stat", "title": "Booking Conflicts",
+      "gridPos": {"h":4,"w":6,"x":6,"y":9},
+      "targets": [{"expr": "mediflow_booking_conflicts_total", "legendFormat": "total"}],
+      "fieldConfig": {"defaults": {"color": {"mode": "fixed", "fixedColor": "orange"}}}
+    },
+    {
+      "id": 7, "type": "timeseries", "title": "Booking Rate vs Conflict Rate",
+      "gridPos": {"h":7,"w":12,"x":12,"y":9},
+      "targets": [
+        {"expr": "rate(mediflow_bookings_created_total[1m])", "legendFormat": "created/s"},
+        {"expr": "rate(mediflow_booking_conflicts_total[1m])", "legendFormat": "conflicts/s"}
+      ]
+    },
+    {
+      "id": 8, "type": "row", "title": "Cache & Auth", "gridPos": {"h":1,"w":24,"x":0,"y":16}
+    },
+    {
+      "id": 9, "type": "gauge", "title": "Cache Hit Ratio",
+      "gridPos": {"h":5,"w":6,"x":0,"y":17},
+      "targets": [{
+        "expr": "sum(mediflow_cache_hits_total) / (sum(mediflow_cache_hits_total) + sum(mediflow_cache_misses_total))",
+        "legendFormat": "hit ratio"
+      }],
+      "fieldConfig": {"defaults": {"unit": "percentunit", "min": 0, "max": 1,
+        "thresholds": {"steps": [{"color":"red","value":0},{"color":"yellow","value":0.5},{"color":"green","value":0.8}]}
+      }}
+    },
+    {
+      "id": 10, "type": "stat", "title": "Token Family Revocations",
+      "gridPos": {"h":5,"w":6,"x":6,"y":17},
+      "targets": [{"expr": "mediflow_token_family_revocations_total", "legendFormat": "total"}],
+      "fieldConfig": {"defaults": {"color": {"mode": "fixed", "fixedColor": "red"}}}
+    },
+    {
+      "id": 11, "type": "timeseries", "title": "Auth Failures by Reason",
+      "gridPos": {"h":5,"w":12,"x":12,"y":17},
+      "targets": [
+        {"expr": "rate(mediflow_auth_failures_total[1m])", "legendFormat": "{{reason}}"}
+      ]
+    },
+    {
+      "id": 12, "type": "row", "title": "Idempotency & Reports", "gridPos": {"h":1,"w":24,"x":0,"y":22}
+    },
+    {
+      "id": 13, "type": "stat", "title": "Idempotency Replays",
+      "gridPos": {"h":4,"w":6,"x":0,"y":23},
+      "targets": [{"expr": "mediflow_idempotency_replays_total"}]
+    },
+    {
+      "id": 14, "type": "timeseries", "title": "Report Access Rate",
+      "gridPos": {"h":4,"w":18,"x":6,"y":23},
+      "targets": [{"expr": "rate(mediflow_reports_accessed_total[1m])", "legendFormat": "{{status}}"}]
+    }
+  ]
+}
