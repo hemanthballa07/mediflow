@@ -90,6 +90,11 @@ Living source of truth. Updated after every change — big or small.
 
 ---
 
+- ✅ **Integration tests against live stack** (2026-04-19):
+  - `tests/test_integration.py`: 9 tests — health, auth failures (wrong pass/unknown email), `/me` profile, booking missing idempotency key 422, full booking flow (create→idempotency replay→cancel→cancel-again-409), report list own, admin key enforcement
+  - Session fixture flushes Redis before run to clear rate limit counters
+  - Slot fixture filters to ≥2 days from now to stay outside 24h cancellation window
+  - 9/9 pass; 27 unit + 9 integration = 36 total
 - ✅ **Docker smoke test + timezone fix** (2026-04-19):
   - `app/models/models.py`: all `mapped_column(DateTime,` → `mapped_column(DateTime(timezone=True),` (10 columns)
   - `migrations/versions/001_initial.py`: all `sa.DateTime,` → `sa.DateTime(timezone=True),` (11 columns → TIMESTAMPTZ)
