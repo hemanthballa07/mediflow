@@ -3,15 +3,17 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from slowapi.errors import RateLimitExceeded
+from sqlalchemy import text
 
 from app.api.v1 import api_router
-from app.db.session import engine
+from app.db.session import engine, AsyncSessionLocal
 from app.db.redis import get_redis, close_redis
 from app.models import models  # noqa: F401 — ensure models are registered
 from app.core.metrics import start_metrics_server
 from app.middleware.metrics import MetricsMiddleware
 from app.core.logging import get_logger
 from app.core.limiter import limiter
+from app.schemas.schemas import HealthResponse
 
 log = get_logger(__name__)
 
@@ -55,6 +57,26 @@ app.add_middleware(
 app.include_router(api_router)
 
 
-@app.get("/health", tags=["health"])
+@app.get("/health", response_model=HealthResponse, tags=["health"])
 async def health():
-    return {"status": "ok", "service": "mediflow"}
+    db_status = "ok"
+    redis_status = "ok"
+
+    try:
+        async with AsyncSessionLocal() as session:
+            await session.execute(text("SELECT 1"))
+    except Exception:
+        db_status = "error"
+
+    try:
+        r = await get_redis()
+        await r.ping()
+    except Exception:
+        redis_status = "error"
+
+    overall = "ok" if db_status == "ok" and redis_status == "ok" else "error"
+    status_code = 200 if overall == "ok" else 503
+    return JSONResponse(
+        content={"status": overall, "service": "mediflow", "db": db_status, "redis": redis_status},
+        status_code=status_code,
+    )

@@ -5,6 +5,15 @@ from typing import Literal
 from pydantic import BaseModel, EmailStr
 
 
+# ── Health ────────────────────────────────────────────────────────────────────
+
+class HealthResponse(BaseModel):
+    status: Literal["ok", "error"]
+    service: str
+    db: Literal["ok", "error"]
+    redis: Literal["ok", "error"]
+
+
 # ── Auth ──────────────────────────────────────────────────────────────────────
 
 class RegisterRequest(BaseModel):

@@ -302,3 +302,300 @@ def test_report_page_next_cursor_defaults_none():
     from app.schemas.schemas import ReportPage
     page = ReportPage(items=[])
     assert page.next_cursor is None
+
+
+# ── Phase D: health endpoint ──────────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_health_returns_200_when_all_healthy():
+    """GET /health returns 200 with ok status when DB and Redis are up."""
+    import json
+    from fastapi.responses import JSONResponse
+    from app.main import health
+
+    with patch("app.main.AsyncSessionLocal") as mock_session_cls, \
+         patch("app.main.get_redis") as mock_get_redis:
+
+        mock_session = AsyncMock()
+        mock_session.execute = AsyncMock()
+        mock_session.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_session.__aexit__ = AsyncMock(return_value=False)
+        mock_session_cls.return_value = mock_session
+
+        mock_redis = AsyncMock()
+        mock_redis.ping = AsyncMock()
+        mock_get_redis.return_value = mock_redis
+
+        response = await health()
+
+    assert isinstance(response, JSONResponse)
+    assert response.status_code == 200
+    body = json.loads(response.body)
+    assert body["status"] == "ok"
+    assert body["db"] == "ok"
+    assert body["redis"] == "ok"
+
+
+@pytest.mark.asyncio
+async def test_health_returns_503_when_db_fails():
+    """GET /health returns 503 with db=error when DB is unreachable."""
+    import json
+    from fastapi.responses import JSONResponse
+    from app.main import health
+
+    with patch("app.main.AsyncSessionLocal") as mock_session_cls, \
+         patch("app.main.get_redis") as mock_get_redis:
+
+        mock_session = AsyncMock()
+        mock_session.execute = AsyncMock(side_effect=Exception("DB down"))
+        mock_session.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_session.__aexit__ = AsyncMock(return_value=False)
+        mock_session_cls.return_value = mock_session
+
+        mock_redis = AsyncMock()
+        mock_redis.ping = AsyncMock()
+        mock_get_redis.return_value = mock_redis
+
+        response = await health()
+
+    assert isinstance(response, JSONResponse)
+    assert response.status_code == 503
+    body = json.loads(response.body)
+    assert body["status"] == "error"
+    assert body["db"] == "error"
+    assert body["redis"] == "ok"
+
+
+@pytest.mark.asyncio
+async def test_health_returns_503_when_redis_fails():
+    """GET /health returns 503 with redis=error when Redis is unreachable."""
+    import json
+    from fastapi.responses import JSONResponse
+    from app.main import health
+
+    with patch("app.main.AsyncSessionLocal") as mock_session_cls, \
+         patch("app.main.get_redis") as mock_get_redis:
+
+        mock_session = AsyncMock()
+        mock_session.execute = AsyncMock()
+        mock_session.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_session.__aexit__ = AsyncMock(return_value=False)
+        mock_session_cls.return_value = mock_session
+
+        mock_get_redis.side_effect = Exception("Redis down")
+
+        response = await health()
+
+    assert isinstance(response, JSONResponse)
+    assert response.status_code == 503
+    body = json.loads(response.body)
+    assert body["status"] == "error"
+    assert body["db"] == "ok"
+    assert body["redis"] == "error"
+
+
+# ── Phase D: slot validation ──────────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_slot_create_rejects_end_before_start():
+    """POST /admin/slots returns 422 when end_time <= start_time."""
+    from datetime import date, time
+    from fastapi import HTTPException
+    from app.api.v1.endpoints.admin import create_slot
+    from app.schemas.schemas import SlotCreate
+
+    payload = SlotCreate(
+        doctor_id=uuid.uuid4(),
+        date=date.today(),
+        start_time=time(10, 0),
+        end_time=time(9, 0),
+    )
+    mock_db = AsyncMock()
+
+    with pytest.raises(HTTPException) as exc_info:
+        await create_slot(payload=payload, _=None, db=mock_db)
+
+    assert exc_info.value.status_code == 422
+    assert "end_time" in exc_info.value.detail.lower()
+
+
+@pytest.mark.asyncio
+async def test_slot_create_rejects_past_date():
+    """POST /admin/slots returns 422 when slot date is in the past."""
+    from datetime import date, time
+    from fastapi import HTTPException
+    from app.api.v1.endpoints.admin import create_slot
+    from app.schemas.schemas import SlotCreate
+
+    payload = SlotCreate(
+        doctor_id=uuid.uuid4(),
+        date=date(2020, 1, 1),
+        start_time=time(9, 0),
+        end_time=time(10, 0),
+    )
+    mock_db = AsyncMock()
+
+    with pytest.raises(HTTPException) as exc_info:
+        await create_slot(payload=payload, _=None, db=mock_db)
+
+    assert exc_info.value.status_code == 422
+    assert "past" in exc_info.value.detail.lower()
+
+
+# ── Phase D: report cache TTL ─────────────────────────────────────────────────
+
+def test_report_cache_ttl_comes_from_config():
+    """REPORT_CACHE_TTL is defined in settings, not hardcoded."""
+    from app.core.config import get_settings
+    s = get_settings()
+    assert hasattr(s, "REPORT_CACHE_TTL")
+    assert s.REPORT_CACHE_TTL == 300
+
+
+# ── Phase D: auth failures ────────────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_login_wrong_password_returns_401():
+    """Login with wrong password raises 401 and increments auth_failures_total."""
+    from fastapi import HTTPException
+    from app.services.auth import AuthService
+    from app.core import metrics
+
+    user = MagicMock()
+    user.hashed_password = "hashed"
+
+    mock_result = MagicMock()
+    mock_result.scalar_one_or_none.return_value = user
+
+    mock_db = AsyncMock()
+    mock_db.execute = AsyncMock(return_value=mock_result)
+    mock_db.add = MagicMock()
+    mock_db.flush = AsyncMock()
+    mock_db.commit = AsyncMock()
+
+    initial = metrics.auth_failures_total.labels(reason="bad_credentials")._value.get()
+
+    with patch("app.services.auth.verify_password", return_value=False):
+        with pytest.raises(HTTPException) as exc_info:
+            await AuthService.login(email="x@x.com", password="wrong", db=mock_db)
+
+    assert exc_info.value.status_code == 401
+    assert metrics.auth_failures_total.labels(reason="bad_credentials")._value.get() == initial + 1
+
+
+@pytest.mark.asyncio
+async def test_login_unknown_email_returns_401():
+    """Login with unknown email raises 401."""
+    from fastapi import HTTPException
+    from app.services.auth import AuthService
+
+    mock_result = MagicMock()
+    mock_result.scalar_one_or_none.return_value = None
+
+    mock_db = AsyncMock()
+    mock_db.execute = AsyncMock(return_value=mock_result)
+    mock_db.add = MagicMock()
+    mock_db.flush = AsyncMock()
+    mock_db.commit = AsyncMock()
+
+    with pytest.raises(HTTPException) as exc_info:
+        await AuthService.login(email="nobody@x.com", password="any", db=mock_db)
+
+    assert exc_info.value.status_code == 401
+
+
+# ── Phase D: booking cancellation ────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_cancel_booking_own_succeeds():
+    """A user can cancel their own booking."""
+    from app.services.booking import BookingService
+
+    user_id = uuid.uuid4()
+    booking_id = uuid.uuid4()
+    slot_id = uuid.uuid4()
+
+    booking = MagicMock()
+    booking.id = booking_id
+    booking.user_id = user_id
+    booking.slot_id = slot_id
+    booking.status = "active"
+
+    slot = MagicMock()
+    slot.doctor_id = uuid.uuid4()
+    slot.date = "2026-06-15"
+
+    mock_result_booking = MagicMock()
+    mock_result_booking.scalar_one_or_none.return_value = booking
+    mock_result_slot = MagicMock()
+    mock_result_slot.scalar_one_or_none.return_value = slot
+
+    mock_db = AsyncMock()
+    mock_db.execute = AsyncMock(side_effect=[mock_result_booking, AsyncMock(), mock_result_slot])
+    mock_db.add = MagicMock()
+    mock_db.flush = AsyncMock()
+    mock_db.commit = AsyncMock()
+
+    mock_redis = AsyncMock()
+
+    await BookingService.cancel_booking(
+        booking_id=booking_id, user_id=user_id, db=mock_db, redis=mock_redis
+    )
+    assert booking.status == "cancelled"
+
+
+@pytest.mark.asyncio
+async def test_cancel_booking_other_user_returns_403():
+    """A user cannot cancel another user's booking."""
+    from fastapi import HTTPException
+    from app.services.booking import BookingService
+
+    owner_id = uuid.uuid4()
+    other_id = uuid.uuid4()
+    booking_id = uuid.uuid4()
+
+    booking = MagicMock()
+    booking.id = booking_id
+    booking.user_id = owner_id
+    booking.status = "active"
+
+    mock_result = MagicMock()
+    mock_result.scalar_one_or_none.return_value = booking
+
+    mock_db = AsyncMock()
+    mock_db.execute = AsyncMock(return_value=mock_result)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await BookingService.cancel_booking(
+            booking_id=booking_id, user_id=other_id, db=mock_db, redis=AsyncMock()
+        )
+
+    assert exc_info.value.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_cancel_already_cancelled_returns_409():
+    """Cancelling an already-cancelled booking raises 409."""
+    from fastapi import HTTPException
+    from app.services.booking import BookingService
+
+    user_id = uuid.uuid4()
+    booking_id = uuid.uuid4()
+
+    booking = MagicMock()
+    booking.id = booking_id
+    booking.user_id = user_id
+    booking.status = "cancelled"
+
+    mock_result = MagicMock()
+    mock_result.scalar_one_or_none.return_value = booking
+
+    mock_db = AsyncMock()
+    mock_db.execute = AsyncMock(return_value=mock_result)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await BookingService.cancel_booking(
+            booking_id=booking_id, user_id=user_id, db=mock_db, redis=AsyncMock()
+        )
+
+    assert exc_info.value.status_code == 409

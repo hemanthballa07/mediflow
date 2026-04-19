@@ -1,5 +1,6 @@
 import uuid
 import hmac
+from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, desc
@@ -47,6 +48,10 @@ async def create_slot(
     db: AsyncSession = Depends(get_db),
 ):
     """Create an appointment slot for a doctor."""
+    if payload.end_time <= payload.start_time:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail="end_time must be after start_time")
+    if payload.date < datetime.now(timezone.utc).date():
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail="Slot date must not be in the past")
     # Verify doctor exists
     result = await db.execute(select(Doctor).where(Doctor.id == payload.doctor_id))
     if not result.scalar_one_or_none():

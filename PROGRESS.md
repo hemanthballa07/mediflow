@@ -28,6 +28,15 @@ Living source of truth. Updated after every change — big or small.
 - ✅ **`PROGRESS.md` created** — This file; living log of all changes
 - ✅ **Security review** — 6 critical, 7 high, 8 medium, 4 low issues identified
 - ✅ **Python review** — 1 critical, 7 high, 8 medium, 4 low issues identified
+- ✅ **Phases A–D: health endpoint, config cleanup, slot validation, test expansion** (2026-04-18):
+  - `app/schemas/schemas.py`: added `HealthResponse` model
+  - `app/main.py`: upgraded `/health` stub to real DB (`SELECT 1`) + Redis (`PING`) checks; 200 healthy / 503 unhealthy; `response_model`
+  - `app/core/config.py`: added `REPORT_CACHE_TTL: int = 300`
+  - `app/services/reports.py`: replaced hardcoded `300` with `settings.REPORT_CACHE_TTL`
+  - `app/api/v1/endpoints/admin.py`: slot creation rejects `end_time <= start_time` and past dates with 422; fixed deprecated `HTTP_422_UNPROCESSABLE_ENTITY` → `HTTP_422_UNPROCESSABLE_CONTENT`
+  - `tests/test_core.py`: 11 new tests — health 200/503, slot validation, report TTL config, auth failures, booking cancellation (own/other/already-cancelled)
+  - Tests: 13 → 24 passing
+  - **Follow-up:** Phase E (migration automation), F (admin pagination), G (features) remain
 - ✅ **Block F: python-jose → PyJWT migration** (2026-04-18):
   - `requirements.txt`: replaced `python-jose[cryptography]==3.3.0` with `PyJWT==2.10.0` — eliminates known CVEs (GHSA-cjwg-qfpm-7377, alg confusion)
   - `app/core/security.py`: `from jose import JWTError, jwt` → `import jwt; from jwt.exceptions import InvalidTokenError`; updated docstring

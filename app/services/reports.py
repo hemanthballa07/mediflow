@@ -109,7 +109,7 @@ class ReportService:
                 "items": [r.model_dump(mode="json") for r in out_items],
                 "next_cursor": str(next_cursor) if next_cursor else None,
             }
-            await redis.setex(cache_key, 300, json.dumps(payload))  # 5-min TTL for report list
+            await redis.setex(cache_key, settings.REPORT_CACHE_TTL, json.dumps(payload))
 
         reports_accessed_total.labels(status="list").inc()
         return page

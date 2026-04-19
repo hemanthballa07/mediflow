@@ -17,6 +17,7 @@ class Settings(BaseSettings):
 
     IDEMPOTENCY_TTL_SECONDS: int = 86400
     SLOT_CACHE_TTL: int = 30
+    REPORT_CACHE_TTL: int = 300
 
     @model_validator(mode="after")
     def validate_secrets(self) -> "Settings":
