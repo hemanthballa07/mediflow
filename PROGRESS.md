@@ -90,6 +90,12 @@ Living source of truth. Updated after every change — big or small.
 
 ---
 
+- ✅ **Phase G.1: Booking cancellation window** (2026-04-18):
+  - `app/core/config.py`: added `CANCELLATION_WINDOW_HOURS: int = 24`
+  - `app/services/booking.py`: `cancel_booking` loads slot before cancellation; combines `slot.date + slot.start_time` → UTC datetime; rejects 409 if `now >= appointment_dt - 24h`; slot reused for cache invalidation (no extra query)
+  - `tests/test_core.py`: fixed `test_cancel_booking_own_succeeds` — added `date`/`time` imports, proper typed slot fields, corrected `execute` side_effect order
+  - 24/24 tests pass
+
 ## In Progress
 
 ---

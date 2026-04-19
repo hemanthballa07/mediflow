@@ -18,6 +18,7 @@ class Settings(BaseSettings):
     IDEMPOTENCY_TTL_SECONDS: int = 86400
     SLOT_CACHE_TTL: int = 30
     REPORT_CACHE_TTL: int = 300
+    CANCELLATION_WINDOW_HOURS: int = 24
 
     @model_validator(mode="after")
     def validate_secrets(self) -> "Settings":

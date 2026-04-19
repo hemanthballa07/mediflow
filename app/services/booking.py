@@ -1,6 +1,6 @@
 import uuid
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, text
 from sqlalchemy.exc import IntegrityError
@@ -192,6 +192,17 @@ class BookingService:
         if booking.status == "cancelled":
             raise HTTPException(status.HTTP_409_CONFLICT, detail="Already cancelled")
 
+        slot_res = await db.execute(select(Slot).where(Slot.id == booking.slot_id))
+        slot = slot_res.scalar_one_or_none()
+        if slot:
+            appointment_dt = datetime.combine(slot.date, slot.start_time, tzinfo=timezone.utc)
+            deadline = appointment_dt - timedelta(hours=settings.CANCELLATION_WINDOW_HOURS)
+            if datetime.now(timezone.utc) >= deadline:
+                raise HTTPException(
+                    status.HTTP_409_CONFLICT,
+                    detail=f"Cannot cancel within {settings.CANCELLATION_WINDOW_HOURS}h of appointment",
+                )
+
         booking.status = "cancelled"
 
         # Free the slot back up
@@ -208,9 +219,6 @@ class BookingService:
         await db.commit()
         booking_cancelled_total.inc()
 
-        # Invalidate cache
-        slot_res = await db.execute(select(Slot).where(Slot.id == booking.slot_id))
-        slot = slot_res.scalar_one_or_none()
         if slot:
             await redis.delete(f"slots:{slot.doctor_id}:{slot.date}")
 

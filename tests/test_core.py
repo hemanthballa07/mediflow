@@ -4,6 +4,7 @@ Run: pytest tests/ -v
 """
 import pytest
 import uuid
+from datetime import date, time
 from unittest.mock import AsyncMock, MagicMock, patch
 from pydantic import ValidationError
 from app.core.security import (
@@ -523,7 +524,8 @@ async def test_cancel_booking_own_succeeds():
 
     slot = MagicMock()
     slot.doctor_id = uuid.uuid4()
-    slot.date = "2026-06-15"
+    slot.date = date(2026, 6, 15)
+    slot.start_time = time(9, 0)
 
     mock_result_booking = MagicMock()
     mock_result_booking.scalar_one_or_none.return_value = booking
@@ -531,7 +533,7 @@ async def test_cancel_booking_own_succeeds():
     mock_result_slot.scalar_one_or_none.return_value = slot
 
     mock_db = AsyncMock()
-    mock_db.execute = AsyncMock(side_effect=[mock_result_booking, AsyncMock(), mock_result_slot])
+    mock_db.execute = AsyncMock(side_effect=[mock_result_booking, mock_result_slot, AsyncMock()])
     mock_db.add = MagicMock()
     mock_db.flush = AsyncMock()
     mock_db.commit = AsyncMock()
