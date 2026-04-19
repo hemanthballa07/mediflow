@@ -34,6 +34,8 @@ services:
     command: alembic upgrade head
     environment:
       DATABASE_URL: postgresql+asyncpg://mediflow:mediflow@postgres:5432/mediflow
+      JWT_SECRET: migrator-placeholder-not-used-for-auth-xx
+      ADMIN_API_KEY: migrator-placeholder-not-used-for-auth-xx
     depends_on:
       postgres:
         condition: service_healthy
@@ -53,7 +55,7 @@ services:
       JWT_ALGORITHM: HS256
       ACCESS_TOKEN_EXPIRE_MINUTES: 15
       REFRESH_TOKEN_EXPIRE_DAYS: 7
-      ADMIN_API_KEY: changeme-replace-in-prod
+      ADMIN_API_KEY: changeme-replace-in-prod-xxxxxxxxxx
       ENVIRONMENT: development
     depends_on:
       postgres:

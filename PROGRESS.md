@@ -90,6 +90,12 @@ Living source of truth. Updated after every change — big or small.
 
 ---
 
+- ✅ **Docker smoke test + timezone fix** (2026-04-19):
+  - `app/models/models.py`: all `mapped_column(DateTime,` → `mapped_column(DateTime(timezone=True),` (10 columns)
+  - `migrations/versions/001_initial.py`: all `sa.DateTime,` → `sa.DateTime(timezone=True),` (11 columns → TIMESTAMPTZ)
+  - `migrations/env.py`: added `DATABASE_URL` env override so migrator uses Docker service hostname, not `localhost`
+  - `docker-compose.yml`: added `JWT_SECRET`/`ADMIN_API_KEY` placeholders to migrator; padded api `ADMIN_API_KEY` to ≥32 chars
+  - `make up && make seed` clean; `/health` returns `{"status":"ok","db":"ok","redis":"ok"}`; 27/27 tests pass
 - ✅ **Phase G tests: coverage for G.1/G.2/G.3** (2026-04-18):
   - `tests/test_core.py`: 3 new tests — cancellation window 409 (1h-from-now slot), `get_user_id_from_request` extracts JWT sub, `db_query_duration_seconds` isinstance Histogram
   - 24 → 27 tests pass

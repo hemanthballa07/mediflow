@@ -23,7 +23,7 @@ def upgrade() -> None:
         sa.Column("hashed_password", sa.Text, nullable=False),
         sa.Column("name", sa.Text, nullable=False),
         sa.Column("role", sa.String(20), nullable=False, server_default="patient"),
-        sa.Column("created_at", sa.DateTime, nullable=False, server_default=sa.text("now()")),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("now()")),
     )
 
     # ── doctors ───────────────────────────────────────────────────────────────
@@ -32,7 +32,7 @@ def upgrade() -> None:
         sa.Column("id", UUID(as_uuid=True), primary_key=True, server_default=sa.text("gen_random_uuid()")),
         sa.Column("user_id", UUID(as_uuid=True), sa.ForeignKey("users.id"), nullable=False),
         sa.Column("specialty", sa.Text, nullable=False),
-        sa.Column("created_at", sa.DateTime, nullable=False, server_default=sa.text("now()")),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("now()")),
     )
 
     # ── slots ─────────────────────────────────────────────────────────────────
@@ -44,7 +44,7 @@ def upgrade() -> None:
         sa.Column("start_time", sa.Time, nullable=False),
         sa.Column("end_time", sa.Time, nullable=False),
         sa.Column("status", sa.String(20), nullable=False, server_default="available"),
-        sa.Column("created_at", sa.DateTime, nullable=False, server_default=sa.text("now()")),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("now()")),
     )
     op.create_index("ix_slots_doctor_date", "slots", ["doctor_id", "date", "start_time"])
 
@@ -55,7 +55,7 @@ def upgrade() -> None:
         sa.Column("user_id", UUID(as_uuid=True), sa.ForeignKey("users.id"), nullable=False),
         sa.Column("slot_id", UUID(as_uuid=True), sa.ForeignKey("slots.id"), nullable=False),
         sa.Column("status", sa.String(20), nullable=False, server_default="active"),
-        sa.Column("created_at", sa.DateTime, nullable=False, server_default=sa.text("now()")),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("now()")),
     )
     op.create_unique_constraint("uq_bookings_slot_id", "bookings", ["slot_id"])
     op.create_index("ix_bookings_user_id", "bookings", ["user_id"])
@@ -68,7 +68,7 @@ def upgrade() -> None:
         sa.Column("report_type", sa.String(50), nullable=False),
         sa.Column("status", sa.String(20), nullable=False, server_default="PENDING"),
         sa.Column("data", sa.Text, nullable=True),
-        sa.Column("created_at", sa.DateTime, nullable=False, server_default=sa.text("now()")),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("now()")),
     )
     # Composite index: patient + status + created_at — powers keyset pagination
     op.create_index(
@@ -81,7 +81,7 @@ def upgrade() -> None:
     op.create_table(
         "audit_log",
         sa.Column("id", sa.BigInteger, primary_key=True, autoincrement=True),
-        sa.Column("ts", sa.DateTime, nullable=False, server_default=sa.text("now()")),
+        sa.Column("ts", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("now()")),
         sa.Column("user_id", UUID(as_uuid=True), nullable=True),
         sa.Column("action", sa.Text, nullable=False),
         sa.Column("target", sa.Text, nullable=True),
@@ -115,8 +115,8 @@ def upgrade() -> None:
         sa.Column("key", sa.Text, nullable=False),
         sa.Column("status", sa.String(20), nullable=False, server_default="PENDING"),
         sa.Column("response", JSONB, nullable=True),
-        sa.Column("created_at", sa.DateTime, nullable=False, server_default=sa.text("now()")),
-        sa.Column("updated_at", sa.DateTime, nullable=False, server_default=sa.text("now()")),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("now()")),
+        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("now()")),
     )
     op.create_unique_constraint("uq_idempotency_user_key", "idempotency_keys", ["user_id", "key"])
 
@@ -127,9 +127,9 @@ def upgrade() -> None:
         sa.Column("user_id", UUID(as_uuid=True), sa.ForeignKey("users.id"), nullable=False),
         sa.Column("family_id", UUID(as_uuid=True), nullable=False, server_default=sa.text("gen_random_uuid()")),
         sa.Column("token_jti", sa.Text, unique=True, nullable=False),
-        sa.Column("issued_at", sa.DateTime, nullable=False, server_default=sa.text("now()")),
-        sa.Column("expires_at", sa.DateTime, nullable=False),
-        sa.Column("used_at", sa.DateTime, nullable=True),
+        sa.Column("issued_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("now()")),
+        sa.Column("expires_at", sa.DateTime(timezone=True), nullable=False),
+        sa.Column("used_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("revoked", sa.Boolean, nullable=False, server_default="false"),
     )
     op.create_index("ix_refresh_tokens_user_family", "refresh_tokens", ["user_id", "family_id"])
