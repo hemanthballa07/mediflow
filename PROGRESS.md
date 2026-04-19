@@ -90,6 +90,10 @@ Living source of truth. Updated after every change — big or small.
 
 ---
 
+- ✅ **Phase G.3: SQLAlchemy query latency histogram** (2026-04-18):
+  - `app/core/metrics.py`: added `db_query_duration_seconds` Histogram (`mediflow_db_query_duration_seconds`)
+  - `app/db/session.py`: `before_cursor_execute` / `after_cursor_execute` event hooks on `engine.sync_engine`; `time.perf_counter()` stacked per-connection; elapsed observed into histogram on completion
+  - 24/24 tests pass
 - ✅ **Phase G.2: Per-user booking rate limit** (2026-04-18):
   - `app/core/limiter.py`: added `get_user_id_from_request` key function — decodes JWT Bearer token, extracts `sub` (user UUID); falls back to IP on failure
   - `app/api/v1/endpoints/bookings.py`: `@limiter.limit("10/hour", key_func=get_user_id_from_request)` on `create_booking`; added `request: Request` first param (required by slowapi)

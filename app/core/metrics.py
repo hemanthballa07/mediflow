@@ -68,6 +68,13 @@ reports_accessed_total = Counter(
     ["status"],  # hit | miss
 )
 
+# ── Database ──────────────────────────────────────────────────────────────────
+db_query_duration_seconds = Histogram(
+    "mediflow_db_query_duration_seconds",
+    "SQLAlchemy query execution latency",
+    buckets=[0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0],
+)
+
 # ── Idempotency ───────────────────────────────────────────────────────────────
 idempotency_replays_total = Counter(
     "mediflow_idempotency_replays_total",
