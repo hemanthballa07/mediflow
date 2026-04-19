@@ -601,3 +601,68 @@ async def test_cancel_already_cancelled_returns_409():
         )
 
     assert exc_info.value.status_code == 409
+
+
+# ── Phase G tests ─────────────────────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_cancel_booking_within_24h_window_raises_409():
+    """Cancel within 24h of appointment start raises 409."""
+    from datetime import datetime, timezone, timedelta
+    from fastapi import HTTPException
+    from app.services.booking import BookingService
+
+    user_id = uuid.uuid4()
+    booking_id = uuid.uuid4()
+    slot_id = uuid.uuid4()
+
+    booking = MagicMock()
+    booking.id = booking_id
+    booking.user_id = user_id
+    booking.slot_id = slot_id
+    booking.status = "active"
+
+    soon = datetime.now(timezone.utc) + timedelta(hours=1)
+    slot = MagicMock()
+    slot.date = soon.date()
+    slot.start_time = soon.time()
+
+    mock_result_booking = MagicMock()
+    mock_result_booking.scalar_one_or_none.return_value = booking
+    mock_result_slot = MagicMock()
+    mock_result_slot.scalar_one_or_none.return_value = slot
+
+    mock_db = AsyncMock()
+    mock_db.execute = AsyncMock(side_effect=[mock_result_booking, mock_result_slot])
+
+    with pytest.raises(HTTPException) as exc_info:
+        await BookingService.cancel_booking(
+            booking_id=booking_id, user_id=user_id, db=mock_db, redis=AsyncMock()
+        )
+
+    assert exc_info.value.status_code == 409
+    assert "24h" in exc_info.value.detail
+
+
+def test_get_user_id_from_request_extracts_jwt_sub():
+    """get_user_id_from_request returns user UUID from valid Bearer token."""
+    from app.core.limiter import get_user_id_from_request
+    from app.core.security import create_access_token
+
+    user_id = uuid.uuid4()
+    token = create_access_token(user_id=user_id, role="patient")
+
+    request = MagicMock()
+    request.headers = {"Authorization": f"Bearer {token}"}
+
+    result = get_user_id_from_request(request)
+    assert result == str(user_id)
+
+
+def test_db_query_duration_histogram_is_registered():
+    """db_query_duration_seconds is a Histogram with observe callable."""
+    from prometheus_client import Histogram
+    from app.core.metrics import db_query_duration_seconds
+
+    assert isinstance(db_query_duration_seconds, Histogram)
+    assert callable(db_query_duration_seconds.observe)

@@ -90,6 +90,9 @@ Living source of truth. Updated after every change — big or small.
 
 ---
 
+- ✅ **Phase G tests: coverage for G.1/G.2/G.3** (2026-04-18):
+  - `tests/test_core.py`: 3 new tests — cancellation window 409 (1h-from-now slot), `get_user_id_from_request` extracts JWT sub, `db_query_duration_seconds` isinstance Histogram
+  - 24 → 27 tests pass
 - ✅ **Phase G.3: SQLAlchemy query latency histogram** (2026-04-18):
   - `app/core/metrics.py`: added `db_query_duration_seconds` Histogram (`mediflow_db_query_duration_seconds`)
   - `app/db/session.py`: `before_cursor_execute` / `after_cursor_execute` event hooks on `engine.sync_engine`; `time.perf_counter()` stacked per-connection; elapsed observed into histogram on completion
