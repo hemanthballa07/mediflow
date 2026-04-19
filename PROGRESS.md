@@ -90,6 +90,10 @@ Living source of truth. Updated after every change — big or small.
 
 ---
 
+- ✅ **Phase G.2: Per-user booking rate limit** (2026-04-18):
+  - `app/core/limiter.py`: added `get_user_id_from_request` key function — decodes JWT Bearer token, extracts `sub` (user UUID); falls back to IP on failure
+  - `app/api/v1/endpoints/bookings.py`: `@limiter.limit("10/hour", key_func=get_user_id_from_request)` on `create_booking`; added `request: Request` first param (required by slowapi)
+  - 24/24 tests pass
 - ✅ **Phase G.1: Booking cancellation window** (2026-04-18):
   - `app/core/config.py`: added `CANCELLATION_WINDOW_HOURS: int = 24`
   - `app/services/booking.py`: `cancel_booking` loads slot before cancellation; combines `slot.date + slot.start_time` → UTC datetime; rejects 409 if `now >= appointment_dt - 24h`; slot reused for cache invalidation (no extra query)
