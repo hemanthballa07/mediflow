@@ -1,6 +1,7 @@
 import uuid
 from datetime import datetime, timedelta, timezone
-from jose import JWTError, jwt
+import jwt
+from jwt.exceptions import InvalidTokenError
 from passlib.context import CryptContext
 from app.core.config import get_settings
 
@@ -30,7 +31,7 @@ def create_access_token(user_id: uuid.UUID, role: str) -> str:
 
 
 def decode_access_token(token: str) -> dict:
-    """Raises JWTError on invalid/expired token."""
+    """Raises InvalidTokenError on invalid/expired token."""
     return jwt.decode(token, settings.JWT_SECRET, algorithms=[settings.JWT_ALGORITHM])
 
 

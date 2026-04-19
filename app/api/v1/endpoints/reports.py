@@ -1,5 +1,5 @@
 import uuid
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 import redis.asyncio as aioredis
 
@@ -45,5 +45,8 @@ async def list_reports(
     """
     Paginated lab report list using keyset pagination (cursor-based).
     Pass next_cursor from previous response as cursor= to get next page.
+    Patients may only list their own reports. Admins and doctors are unrestricted.
     """
+    if current_user.role == "patient" and current_user.id != patient_id:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, detail="Access denied")
     return await ReportService.list_reports(patient_id, report_status, cursor, limit, db, redis)

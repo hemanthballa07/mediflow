@@ -1,7 +1,7 @@
 import uuid
 from fastapi import Depends, HTTPException, Security, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from jose import JWTError
+from jwt.exceptions import InvalidTokenError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
@@ -19,7 +19,7 @@ async def get_current_user(
 ) -> User:
     try:
         payload = decode_access_token(credentials.credentials)
-    except JWTError:
+    except InvalidTokenError:
         auth_failures_total.labels(reason="token_expired").inc()
         raise HTTPException(
             status.HTTP_401_UNAUTHORIZED,
@@ -45,7 +45,3 @@ def require_role(*roles: str):
             raise HTTPException(status.HTTP_403_FORBIDDEN, detail="Insufficient permissions")
         return current_user
     return _check
-
-
-def get_admin_user() -> User:
-    return Depends(require_role("admin"))

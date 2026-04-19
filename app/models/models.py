@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime, date, time
+from datetime import datetime, date, time, timezone
 from sqlalchemy import (
     String, Text, Boolean, DateTime, Date, Time, Numeric,
     ForeignKey, UniqueConstraint, Index, event
@@ -24,7 +24,7 @@ class User(Base):
     hashed_password: Mapped[str] = mapped_column(Text, nullable=False)
     name: Mapped[str] = mapped_column(Text, nullable=False)
     role: Mapped[str] = mapped_column(String(20), nullable=False, default="patient")  # patient | doctor | admin
-    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
 
     bookings: Mapped[list["Booking"]] = relationship("Booking", back_populates="user")
     lab_reports: Mapped[list["LabReport"]] = relationship("LabReport", back_populates="patient")
@@ -40,7 +40,7 @@ class Doctor(Base):
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
     user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
     specialty: Mapped[str] = mapped_column(Text, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
 
     slots: Mapped[list["Slot"]] = relationship("Slot", back_populates="doctor")
 
@@ -79,7 +79,7 @@ class Booking(Base):
     user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
     slot_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("slots.id"), nullable=False)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="active")  # active | cancelled
-    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
 
     user: Mapped["User"] = relationship("User", back_populates="bookings")
     slot: Mapped["Slot"] = relationship("Slot", back_populates="booking")
@@ -99,7 +99,7 @@ class LabReport(Base):
     report_type: Mapped[str] = mapped_column(String(50), nullable=False)   # blood | xray | urine | etc.
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="PENDING")  # PENDING | READY | ARCHIVED
     data: Mapped[str | None] = mapped_column(Text, nullable=True)          # report content / reference
-    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
 
     patient: Mapped["User"] = relationship("User", back_populates="lab_reports")
 
@@ -111,7 +111,7 @@ class AuditLog(Base):
     __tablename__ = "audit_log"
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
-    ts: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+    ts: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
     user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
     action: Mapped[str] = mapped_column(Text, nullable=False)   # BOOKING_CREATED | REPORT_ACCESSED | AUTH_FAILURE | etc.
     target: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -132,8 +132,8 @@ class IdempotencyKey(Base):
     key: Mapped[str] = mapped_column(Text, nullable=False)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="PENDING")  # PENDING | SUCCESS | ERROR
     response: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
+    updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
 
 
 # ─────────────────────────────────────────
@@ -149,7 +149,7 @@ class RefreshToken(Base):
     user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
     family_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False, default=_uuid)
     token_jti: Mapped[str] = mapped_column(Text, unique=True, nullable=False)
-    issued_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+    issued_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
     expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     used_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     revoked: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)

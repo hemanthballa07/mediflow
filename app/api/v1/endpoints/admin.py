@@ -1,4 +1,5 @@
 import uuid
+import hmac
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, desc
@@ -13,7 +14,7 @@ settings = get_settings()
 
 
 def verify_admin_key(x_admin_api_key: str = Header(..., alias="X-Admin-Api-Key")):
-    if x_admin_api_key != settings.ADMIN_API_KEY:
+    if not hmac.compare_digest(x_admin_api_key, settings.ADMIN_API_KEY):
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="Invalid admin API key")
 
 

@@ -1,7 +1,8 @@
 import uuid
 from datetime import datetime, date, time
 from typing import Any
-from pydantic import BaseModel, EmailStr, field_validator
+from typing import Literal
+from pydantic import BaseModel, EmailStr
 
 
 # ── Auth ──────────────────────────────────────────────────────────────────────
@@ -10,14 +11,7 @@ class RegisterRequest(BaseModel):
     email: EmailStr
     password: str
     name: str
-    role: str = "patient"
-
-    @field_validator("role")
-    @classmethod
-    def valid_role(cls, v: str) -> str:
-        if v not in ("patient", "doctor", "admin"):
-            raise ValueError("role must be patient, doctor, or admin")
-        return v
+    role: Literal["patient", "doctor"] = "patient"
 
 
 class LoginRequest(BaseModel):
@@ -106,7 +100,7 @@ class ReportOut(BaseModel):
 
 class ReportPage(BaseModel):
     items: list[ReportOut]
-    next_cursor: uuid.UUID | None   # keyset pagination cursor
+    next_cursor: uuid.UUID | None = None
 
 
 # ── Audit ─────────────────────────────────────────────────────────────────────

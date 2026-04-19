@@ -1,4 +1,5 @@
 import uuid
+from datetime import date
 from fastapi import APIRouter, Depends, Header, HTTPException, status, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 import redis.asyncio as aioredis
@@ -51,9 +52,9 @@ async def cancel_booking(
 @router.get("/slots/available")
 async def get_available_slots(
     doctor_id: uuid.UUID,
-    date: str,
+    date: date,
     db: AsyncSession = Depends(get_db),
     redis: aioredis.Redis = Depends(get_redis),
 ):
     """Get available slots for a doctor on a given date. Redis cache-aside, 30s TTL."""
-    return await BookingService.get_available_slots(doctor_id, date, db, redis)
+    return await BookingService.get_available_slots(doctor_id, str(date), db, redis)
