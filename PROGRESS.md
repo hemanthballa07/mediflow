@@ -28,6 +28,9 @@ Living source of truth. Updated after every change — big or small.
 - ✅ **`PROGRESS.md` created** — This file; living log of all changes
 - ✅ **Security review** — 6 critical, 7 high, 8 medium, 4 low issues identified
 - ✅ **Python review** — 1 critical, 7 high, 8 medium, 4 low issues identified
+- ✅ **Phase F: admin slot pagination** (2026-04-18):
+  - `app/api/v1/endpoints/admin.py`: added `after_date: date | None` keyset cursor to `list_slots` — `WHERE date > after_date ORDER BY date, start_time LIMIT n`; caller uses last item's date as next cursor; `get_audit_log` already had `after_id` keyset pagination, no change needed
+  - 24/24 tests pass
 - ✅ **Phase E: Docker migration automation** (2026-04-18):
   - `docker-compose.yml`: added `migrator` one-shot service (`alembic upgrade head`, `restart: no`); `api` now `depends_on: migrator: condition: service_completed_successfully` — API never starts if migrations fail
   - `docker compose config` validates clean (pre-existing `version` obsolete warning only)

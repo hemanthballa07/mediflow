@@ -1,6 +1,6 @@
 import uuid
 import hmac
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, desc
@@ -74,6 +74,7 @@ async def create_slot(
 async def list_slots(
     doctor_id: uuid.UUID | None = Query(None),
     slot_status: str | None = Query(None),
+    after_date: date | None = Query(None, description="Keyset cursor: return slots with date > after_date"),
     limit: int = Query(50, ge=1, le=200),
     _: None = Depends(verify_admin_key),
     db: AsyncSession = Depends(get_db),
@@ -83,6 +84,8 @@ async def list_slots(
         q = q.where(Slot.doctor_id == doctor_id)
     if slot_status:
         q = q.where(Slot.status == slot_status)
+    if after_date:
+        q = q.where(Slot.date > after_date)
     q = q.order_by(Slot.date, Slot.start_time).limit(limit)
     result = await db.execute(q)
     return [SlotOut.model_validate(s) for s in result.scalars().all()]
