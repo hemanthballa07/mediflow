@@ -28,6 +28,10 @@ Living source of truth. Updated after every change — big or small.
 - ✅ **`PROGRESS.md` created** — This file; living log of all changes
 - ✅ **Security review** — 6 critical, 7 high, 8 medium, 4 low issues identified
 - ✅ **Python review** — 1 critical, 7 high, 8 medium, 4 low issues identified
+- ✅ **Phase E: Docker migration automation** (2026-04-18):
+  - `docker-compose.yml`: added `migrator` one-shot service (`alembic upgrade head`, `restart: no`); `api` now `depends_on: migrator: condition: service_completed_successfully` — API never starts if migrations fail
+  - `docker compose config` validates clean (pre-existing `version` obsolete warning only)
+  - **Follow-up:** Phase F (admin pagination), G (features) remain
 - ✅ **Phases A–D: health endpoint, config cleanup, slot validation, test expansion** (2026-04-18):
   - `app/schemas/schemas.py`: added `HealthResponse` model
   - `app/main.py`: upgraded `/health` stub to real DB (`SELECT 1`) + Redis (`PING`) checks; 200 healthy / 503 unhealthy; `response_model`

@@ -27,6 +27,18 @@ services:
       timeout: 3s
       retries: 10
 
+  migrator:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: alembic upgrade head
+    environment:
+      DATABASE_URL: postgresql+asyncpg://mediflow:mediflow@postgres:5432/mediflow
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
   api:
     build:
       context: .
@@ -48,6 +60,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      migrator:
+        condition: service_completed_successfully
 
   prometheus:
     image: prom/prometheus:latest
