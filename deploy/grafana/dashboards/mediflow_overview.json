@@ -86,6 +86,26 @@
       "id": 14, "type": "timeseries", "title": "Report Access Rate",
       "gridPos": {"h":4,"w":18,"x":6,"y":23},
       "targets": [{"expr": "rate(mediflow_reports_accessed_total[1m])", "legendFormat": "{{status}}"}]
+    },
+    {
+      "id": 15, "type": "row", "title": "Database", "gridPos": {"h":1,"w":24,"x":0,"y":27}
+    },
+    {
+      "id": 16, "type": "timeseries", "title": "DB Query Latency p50 / p95 / p99 (ms)",
+      "gridPos": {"h":7,"w":12,"x":0,"y":28},
+      "targets": [
+        {"expr": "histogram_quantile(0.50, sum(rate(mediflow_db_query_duration_seconds_bucket[1m])) by (le)) * 1000", "legendFormat": "p50"},
+        {"expr": "histogram_quantile(0.95, sum(rate(mediflow_db_query_duration_seconds_bucket[1m])) by (le)) * 1000", "legendFormat": "p95"},
+        {"expr": "histogram_quantile(0.99, sum(rate(mediflow_db_query_duration_seconds_bucket[1m])) by (le)) * 1000", "legendFormat": "p99"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "ms"}}
+    },
+    {
+      "id": 17, "type": "timeseries", "title": "DB Query Rate (queries/s)",
+      "gridPos": {"h":7,"w":12,"x":12,"y":28},
+      "targets": [
+        {"expr": "sum(rate(mediflow_db_query_duration_seconds_count[1m]))", "legendFormat": "queries/s"}
+      ]
     }
   ]
 }

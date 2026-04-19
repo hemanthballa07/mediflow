@@ -90,6 +90,9 @@ Living source of truth. Updated after every change — big or small.
 
 ---
 
+- ✅ **Grafana DB query latency panel** (2026-04-19):
+  - `deploy/grafana/dashboards/mediflow_overview.json`: added "Database" row + p50/p95/p99 latency timeseries + queries/s rate panel using `mediflow_db_query_duration_seconds`
+  - Grafana restarted to pick up provisioned dashboard
 - ✅ **Integration tests against live stack** (2026-04-19):
   - `tests/test_integration.py`: 9 tests — health, auth failures (wrong pass/unknown email), `/me` profile, booking missing idempotency key 422, full booking flow (create→idempotency replay→cancel→cancel-again-409), report list own, admin key enforcement
   - Session fixture flushes Redis before run to clear rate limit counters
