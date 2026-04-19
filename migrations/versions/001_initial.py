@@ -57,7 +57,10 @@ def upgrade() -> None:
         sa.Column("status", sa.String(20), nullable=False, server_default="active"),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("now()")),
     )
-    op.create_unique_constraint("uq_bookings_slot_id", "bookings", ["slot_id"])
+    op.create_index(
+        "uq_active_booking_per_slot", "bookings", ["slot_id"],
+        unique=True, postgresql_where=sa.text("status = 'active'"),
+    )
     op.create_index("ix_bookings_user_id", "bookings", ["user_id"])
 
     # ── lab_reports ───────────────────────────────────────────────────────────
@@ -143,6 +146,7 @@ def downgrade() -> None:
     op.drop_table("idempotency_keys")
     op.drop_table("audit_log")
     op.drop_table("lab_reports")
+    op.drop_index("uq_active_booking_per_slot", "bookings")
     op.drop_table("bookings")
     op.drop_table("slots")
     op.drop_table("doctors")

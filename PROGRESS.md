@@ -90,6 +90,12 @@ Living source of truth. Updated after every change — big or small.
 
 ---
 
+- ✅ **Logout endpoint + partial unique index fix** (2026-04-19):
+  - `app/services/auth.py`: `AuthService.logout(jti, db)` — revokes entire token family; idempotent (unknown JTI silently accepted); audit logs `LOGOUT` action
+  - `app/api/v1/endpoints/auth.py`: `POST /auth/logout` — takes `refresh_token`, returns `{"message": "Logged out successfully"}`
+  - `app/models/models.py` + `migrations/versions/001_initial.py`: replaced `UniqueConstraint("slot_id")` with partial unique index `WHERE status = 'active'` — allows rebooking after cancellation (was a design bug)
+  - `tests/test_integration.py`: `test_logout_revokes_refresh_token` — logout → refresh attempt 401 → second logout 200 (idempotent)
+  - 27 unit + 10 integration = 37 tests pass
 - ✅ **Grafana DB query latency panel** (2026-04-19):
   - `deploy/grafana/dashboards/mediflow_overview.json`: added "Database" row + p50/p95/p99 latency timeseries + queries/s rate panel using `mediflow_db_query_duration_seconds`
   - Grafana restarted to pick up provisioned dashboard

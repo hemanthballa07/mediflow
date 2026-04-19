@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
-from app.schemas.schemas import RegisterRequest, LoginRequest, TokenResponse, RefreshRequest, UserOut
+from app.schemas.schemas import RegisterRequest, LoginRequest, TokenResponse, RefreshRequest, UserOut, MessageResponse
 from app.services.auth import AuthService
 from app.api.v1.deps import get_current_user
 from app.models.models import User
@@ -28,6 +28,13 @@ async def login(request: Request, payload: LoginRequest, db: AsyncSession = Depe
 @limiter.limit("20/minute")
 async def refresh(request: Request, payload: RefreshRequest, db: AsyncSession = Depends(get_db)):
     return await AuthService.refresh(payload.refresh_token, db)
+
+
+@router.post("/logout", response_model=MessageResponse)
+async def logout(payload: RefreshRequest, db: AsyncSession = Depends(get_db)):
+    """Revoke the refresh token family. Idempotent — safe to call even if already logged out."""
+    await AuthService.logout(payload.refresh_token, db)
+    return MessageResponse(message="Logged out successfully")
 
 
 @router.get("/me", response_model=UserOut)

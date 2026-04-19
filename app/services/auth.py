@@ -109,6 +109,30 @@ class AuthService:
         )
 
     @staticmethod
+    async def logout(jti: str, db: AsyncSession) -> None:
+        """Revoke the token's entire family. Idempotent — unknown/already-revoked tokens are silently accepted."""
+        result = await db.execute(
+            select(RefreshToken).where(RefreshToken.token_jti == jti)
+        )
+        token: RefreshToken | None = result.scalar_one_or_none()
+
+        if not token:
+            return
+
+        await db.execute(
+            update(RefreshToken)
+            .where(RefreshToken.family_id == token.family_id)
+            .values(revoked=True)
+        )
+        await AuditService.log(
+            db, action="LOGOUT",
+            user_id=token.user_id,
+            target=str(token.family_id),
+        )
+        await db.commit()
+        log.info("User logged out — family revoked", extra={"user_id": str(token.user_id)})
+
+    @staticmethod
     async def _issue_refresh_token(
         user: User,
         db: AsyncSession,

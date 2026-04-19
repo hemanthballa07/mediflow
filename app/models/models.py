@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime, date, time, timezone
 from sqlalchemy import (
     String, Text, Boolean, DateTime, Date, Time, Numeric,
-    ForeignKey, UniqueConstraint, Index, event
+    ForeignKey, UniqueConstraint, Index, event, text
 )
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -71,7 +71,8 @@ class Slot(Base):
 class Booking(Base):
     __tablename__ = "bookings"
     __table_args__ = (
-        UniqueConstraint("slot_id", name="uq_bookings_slot_id"),  # DB-level safety net
+        Index("uq_active_booking_per_slot", "slot_id", unique=True,
+              postgresql_where=text("status = 'active'")),
         Index("ix_bookings_user_id", "user_id"),
     )
 

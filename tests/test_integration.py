@@ -149,3 +149,25 @@ def test_admin_slots_missing_key_returns_422():
 def test_admin_slots_wrong_key_returns_401():
     r = httpx.get(f"{BASE}/admin/slots", headers={"X-Admin-Api-Key": "wrongkey"})
     assert r.status_code == 401
+
+
+# ── logout ─────────────────────────────────────────────────────────────────────
+
+def test_logout_revokes_refresh_token():
+    # Login to get a fresh token pair
+    r = httpx.post(f"{BASE}/auth/login", json={"email": "doctor@mediflow.dev", "password": "doctor123"})
+    assert r.status_code == 200
+    refresh_token = r.json()["refresh_token"]
+
+    # Logout — revokes the family
+    r2 = httpx.post(f"{BASE}/auth/logout", json={"refresh_token": refresh_token})
+    assert r2.status_code == 200
+    assert r2.json()["message"] == "Logged out successfully"
+
+    # Attempt to use the revoked refresh token → 401
+    r3 = httpx.post(f"{BASE}/auth/refresh", json={"refresh_token": refresh_token})
+    assert r3.status_code == 401
+
+    # Logout again (idempotent) → still 200
+    r4 = httpx.post(f"{BASE}/auth/logout", json={"refresh_token": refresh_token})
+    assert r4.status_code == 200

@@ -123,7 +123,7 @@ class BookingService:
             await db.commit()
 
         except IntegrityError:
-            # Unique constraint on bookings(slot_id) fired — ultimate safety net
+            # Partial unique index (active bookings per slot) fired — ultimate safety net
             await db.rollback()
             booking_conflicts_total.inc()
             raise HTTPException(status.HTTP_409_CONFLICT, detail="Slot already booked (constraint)")
