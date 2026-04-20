@@ -19,6 +19,7 @@ class Settings(BaseSettings):
     SLOT_CACHE_TTL: int = 30
     REPORT_CACHE_TTL: int = 300
     CANCELLATION_WINDOW_HOURS: int = 24
+    BOOKING_RATE_LIMIT: str = "10/hour"
 
     @model_validator(mode="after")
     def validate_secrets(self) -> "Settings":

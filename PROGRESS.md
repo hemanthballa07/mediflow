@@ -90,6 +90,14 @@ Living source of truth. Updated after every change — big or small.
 
 ---
 
+- ✅ **k6 contention test results** (2026-04-19):
+  - 50 VUs hammering same slot for 30s — `SELECT FOR UPDATE SKIP LOCKED` proven correct
+  - `booking_success_total: 1` unique booking through (+ 2 idempotency replays = 3 counted)
+  - `booking_conflict_total: 13,437` — all other attempts correctly rejected at DB level
+  - `booking_5xx_total: 0` — zero server errors under full contention
+  - `http_req_duration p99: 158ms` — well under 300ms threshold even at 50 VUs
+  - `http_reqs: 13,938 @ 464 req/s` throughput
+  - Also: made `BOOKING_RATE_LIMIT` configurable via env (`app/core/config.py`); docker-compose sets `10000/second` for load testing, production default stays `10/hour`
 - ✅ **Logout endpoint + partial unique index fix** (2026-04-19):
   - `app/services/auth.py`: `AuthService.logout(jti, db)` — revokes entire token family; idempotent (unknown JTI silently accepted); audit logs `LOGOUT` action
   - `app/api/v1/endpoints/auth.py`: `POST /auth/logout` — takes `refresh_token`, returns `{"message": "Logged out successfully"}`

@@ -11,12 +11,13 @@ from app.services.booking import BookingService
 from app.api.v1.deps import get_current_user
 from app.models.models import User
 from app.core.limiter import limiter, get_user_id_from_request
+from app.core.config import get_settings as _get_settings
 
 router = APIRouter(prefix="/bookings", tags=["bookings"])
 
 
 @router.post("", status_code=201)
-@limiter.limit("10/hour", key_func=get_user_id_from_request)
+@limiter.limit(lambda: _get_settings().BOOKING_RATE_LIMIT, key_func=get_user_id_from_request)
 async def create_booking(
     request: Request,
     payload: BookingCreate,
