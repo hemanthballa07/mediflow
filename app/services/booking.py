@@ -1,18 +1,19 @@
 import uuid
 import json
-from datetime import datetime, timezone, timedelta
+from datetime import date as date_type, datetime, timezone, timedelta
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, text
 from sqlalchemy.exc import IntegrityError
 from fastapi import HTTPException, status
 import redis.asyncio as aioredis
 
-from app.models.models import Slot, Booking, IdempotencyKey, User
+from app.models.models import Slot, Booking, IdempotencyKey, User, Room
 from app.schemas.schemas import BookingOut
 from app.core.metrics import (
     bookings_created_total, booking_conflicts_total,
     booking_cancelled_total, idempotency_replays_total,
     cache_hits_total, cache_misses_total,
+    bookings_by_status, no_show_total, checkin_to_start_seconds,
 )
 from app.core.config import get_settings
 from app.core.logging import get_logger
@@ -32,6 +33,9 @@ class BookingService:
         idempotency_key: str,
         db: AsyncSession,
         redis: aioredis.Redis,
+        appointment_type_id: uuid.UUID | None = None,
+        room_id: uuid.UUID | None = None,
+        reason_for_visit: str | None = None,
     ) -> tuple[BookingOut, int]:
         """
         Returns (BookingOut, http_status).
@@ -98,13 +102,49 @@ class BookingService:
             await db.commit()
             raise HTTPException(status.HTTP_409_CONFLICT, detail="Slot is not available")
 
+        # ── 3b. Room double-booking check ─────────────────────────────────────
+        if room_id:
+            slot_res = await db.execute(select(Slot).where(Slot.id == slot_id))
+            slot_for_room: Slot | None = slot_res.scalar_one_or_none()
+            if slot_for_room:
+                conflict = await db.execute(
+                    text("""
+                        SELECT b.id FROM bookings b
+                        JOIN slots s ON s.id = b.slot_id
+                        WHERE b.room_id = :room_id
+                          AND b.status NOT IN ('cancelled', 'no_show')
+                          AND s.date = :slot_date
+                          AND s.start_time < :end_time
+                          AND s.end_time > :start_time
+                        LIMIT 1
+                    """),
+                    {
+                        "room_id": str(room_id),
+                        "slot_date": slot_for_room.date,
+                        "start_time": slot_for_room.start_time,
+                        "end_time": slot_for_room.end_time,
+                    },
+                )
+                if conflict.fetchone():
+                    idem_record.status = "ERROR"
+                    idem_record.updated_at = datetime.now(timezone.utc)
+                    await db.commit()
+                    raise HTTPException(status.HTTP_409_CONFLICT, detail="Room already booked for this time")
+
         # ── 4. Create booking + mark slot booked ─────────────────────────────
         try:
             await db.execute(
                 text("UPDATE slots SET status = 'booked' WHERE id = :slot_id"),
                 {"slot_id": str(slot_id)},
             )
-            booking = Booking(user_id=user_id, slot_id=slot_id, status="active")
+            booking = Booking(
+                user_id=user_id,
+                slot_id=slot_id,
+                status="scheduled",
+                appointment_type_id=appointment_type_id,
+                room_id=room_id,
+                reason_for_visit=reason_for_visit,
+            )
             db.add(booking)
             await db.flush()  # triggers unique constraint if somehow a race slipped through
 
@@ -157,10 +197,11 @@ class BookingService:
             return json.loads(cached)
 
         cache_misses_total.labels(cache_key_prefix="slots").inc()
+        parsed_date = date_type.fromisoformat(date_) if isinstance(date_, str) else date_
         result = await db.execute(
             select(Slot).where(
                 Slot.doctor_id == doctor_id,
-                Slot.date == date_,
+                Slot.date == parsed_date,
                 Slot.status == "available",
             ).order_by(Slot.start_time)
         )
@@ -191,6 +232,8 @@ class BookingService:
             raise HTTPException(status.HTTP_403_FORBIDDEN, detail="Not your booking")
         if booking.status == "cancelled":
             raise HTTPException(status.HTTP_409_CONFLICT, detail="Already cancelled")
+        if booking.status in ("completed", "no_show"):
+            raise HTTPException(status.HTTP_409_CONFLICT, detail=f"Cannot cancel a {booking.status} booking")
 
         slot_res = await db.execute(select(Slot).where(Slot.id == booking.slot_id))
         slot = slot_res.scalar_one_or_none()
@@ -222,4 +265,126 @@ class BookingService:
         if slot:
             await redis.delete(f"slots:{slot.doctor_id}:{slot.date}")
 
+        return BookingOut.model_validate(booking)
+
+    # ── Status transitions ────────────────────────────────────────────────────
+
+    @staticmethod
+    async def _load_booking_for_user(
+        booking_id: uuid.UUID,
+        actor_id: uuid.UUID,
+        actor_role: str,
+        db: AsyncSession,
+    ) -> Booking:
+        result = await db.execute(select(Booking).where(Booking.id == booking_id))
+        booking: Booking | None = result.scalar_one_or_none()
+        if not booking:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Booking not found")
+        # Patients can only touch their own; doctors/admin can touch any
+        if actor_role == "patient" and booking.user_id != actor_id:
+            raise HTTPException(status.HTTP_403_FORBIDDEN, detail="Not your booking")
+        return booking
+
+    @staticmethod
+    async def check_in(
+        booking_id: uuid.UUID,
+        actor_id: uuid.UUID,
+        actor_role: str,
+        db: AsyncSession,
+    ) -> BookingOut:
+        booking = await BookingService._load_booking_for_user(booking_id, actor_id, actor_role, db)
+        if booking.status != "scheduled":
+            raise HTTPException(status.HTTP_409_CONFLICT,
+                                detail=f"Cannot check in from status '{booking.status}'")
+        booking.status = "checked_in"
+        booking.checked_in_at = datetime.now(timezone.utc)
+        await AuditService.log(db, action="BOOKING_CHECKED_IN",
+                               user_id=actor_id, target=str(booking_id))
+        await db.commit()
+        bookings_by_status.labels(status="checked_in").inc()
+        return BookingOut.model_validate(booking)
+
+    @staticmethod
+    async def start_appointment(
+        booking_id: uuid.UUID,
+        actor_id: uuid.UUID,
+        actor_role: str,
+        notes: str | None,
+        db: AsyncSession,
+    ) -> BookingOut:
+        if actor_role not in ("doctor", "admin"):
+            raise HTTPException(status.HTTP_403_FORBIDDEN, detail="Only doctors or admins can start appointments")
+        booking = await BookingService._load_booking_for_user(booking_id, actor_id, actor_role, db)
+        if booking.status != "checked_in":
+            raise HTTPException(status.HTTP_409_CONFLICT,
+                                detail=f"Cannot start from status '{booking.status}'")
+        now = datetime.now(timezone.utc)
+        booking.status = "in_progress"
+        booking.started_at = now
+        if notes:
+            booking.notes = notes
+        if booking.checked_in_at:
+            wait_secs = (now - booking.checked_in_at).total_seconds()
+            checkin_to_start_seconds.observe(wait_secs)
+        await AuditService.log(db, action="BOOKING_STARTED",
+                               user_id=actor_id, target=str(booking_id))
+        await db.commit()
+        bookings_by_status.labels(status="in_progress").inc()
+        return BookingOut.model_validate(booking)
+
+    @staticmethod
+    async def complete_appointment(
+        booking_id: uuid.UUID,
+        actor_id: uuid.UUID,
+        actor_role: str,
+        notes: str | None,
+        db: AsyncSession,
+    ) -> BookingOut:
+        if actor_role not in ("doctor", "admin"):
+            raise HTTPException(status.HTTP_403_FORBIDDEN, detail="Only doctors or admins can complete appointments")
+        booking = await BookingService._load_booking_for_user(booking_id, actor_id, actor_role, db)
+        if booking.status != "in_progress":
+            raise HTTPException(status.HTTP_409_CONFLICT,
+                                detail=f"Cannot complete from status '{booking.status}'")
+        booking.status = "completed"
+        booking.completed_at = datetime.now(timezone.utc)
+        if notes:
+            booking.notes = notes
+        await AuditService.log(db, action="BOOKING_COMPLETED",
+                               user_id=actor_id, target=str(booking_id))
+        await db.commit()
+        bookings_by_status.labels(status="completed").inc()
+        return BookingOut.model_validate(booking)
+
+    @staticmethod
+    async def mark_no_show(
+        booking_id: uuid.UUID,
+        actor_id: uuid.UUID,
+        actor_role: str,
+        db: AsyncSession,
+    ) -> BookingOut:
+        if actor_role not in ("doctor", "admin"):
+            raise HTTPException(status.HTTP_403_FORBIDDEN, detail="Only doctors or admins can mark no-show")
+        booking = await BookingService._load_booking_for_user(booking_id, actor_id, actor_role, db)
+        if booking.status not in ("scheduled", "checked_in"):
+            raise HTTPException(status.HTTP_409_CONFLICT,
+                                detail=f"Cannot mark no-show from status '{booking.status}'")
+
+        # Free the slot back up so it can be rebooked
+        await db.execute(
+            text("UPDATE slots SET status = 'available' WHERE id = :sid"),
+            {"sid": str(booking.slot_id)},
+        )
+        booking.status = "no_show"
+
+        # Fetch department for metric label
+        slot_res = await db.execute(select(Slot).where(Slot.id == booking.slot_id))
+        slot = slot_res.scalar_one_or_none()
+        dept_label = str(slot.department_id) if slot and slot.department_id else "unknown"
+
+        await AuditService.log(db, action="BOOKING_NO_SHOW",
+                               user_id=actor_id, target=str(booking_id))
+        await db.commit()
+        no_show_total.labels(department_id=dept_label).inc()
+        bookings_by_status.labels(status="no_show").inc()
         return BookingOut.model_validate(booking)

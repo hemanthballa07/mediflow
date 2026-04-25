@@ -81,6 +81,30 @@ idempotency_replays_total = Counter(
     "Requests served from idempotency cache",
 )
 
+# ── Clinical scheduling ───────────────────────────────────────────────────────
+bookings_by_status = Gauge(
+    "mediflow_bookings_by_status",
+    "Current booking count by status",
+    ["status"],
+)
+
+no_show_total = Counter(
+    "mediflow_no_show_total",
+    "Appointments marked no-show",
+    ["department_id"],
+)
+
+checkin_to_start_seconds = Histogram(
+    "mediflow_checkin_to_start_seconds",
+    "Time between patient check-in and appointment start (waiting time)",
+    buckets=[60, 300, 600, 900, 1800, 3600],
+)
+
+slots_generated_total = Counter(
+    "mediflow_slots_generated_total",
+    "Slots generated from doctor schedules",
+)
+
 
 _metrics_started = False
 _metrics_lock = threading.Lock()
@@ -90,5 +114,9 @@ def start_metrics_server(port: int = 9100) -> None:
     global _metrics_started
     with _metrics_lock:
         if not _metrics_started:
-            start_http_server(port)
-            _metrics_started = True
+            try:
+                start_http_server(port)
+                _metrics_started = True
+            except OSError:
+                # Another worker already bound the port — metrics still collected
+                _metrics_started = True

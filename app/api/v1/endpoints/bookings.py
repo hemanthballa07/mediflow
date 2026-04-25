@@ -6,7 +6,7 @@ import redis.asyncio as aioredis
 
 from app.db.session import get_db
 from app.db.redis import get_redis
-from app.schemas.schemas import BookingCreate, BookingOut, BookingCancel
+from app.schemas.schemas import BookingCreate, BookingOut, BookingCancel, BookingStatusUpdate
 from app.services.booking import BookingService
 from app.api.v1.deps import get_current_user
 from app.models.models import User
@@ -38,6 +38,9 @@ async def create_booking(
         idempotency_key=idempotency_key,
         db=db,
         redis=redis,
+        appointment_type_id=payload.appointment_type_id,
+        room_id=payload.room_id,
+        reason_for_visit=payload.reason_for_visit,
     )
     response.status_code = http_status
     return out
@@ -51,6 +54,46 @@ async def cancel_booking(
     redis: aioredis.Redis = Depends(get_redis),
 ):
     return await BookingService.cancel_booking(booking_id, current_user.id, db, redis)
+
+
+@router.post("/{booking_id}/check-in", response_model=BookingOut)
+async def check_in(
+    booking_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    return await BookingService.check_in(booking_id, current_user.id, current_user.role, db)
+
+
+@router.post("/{booking_id}/start", response_model=BookingOut)
+async def start_appointment(
+    booking_id: uuid.UUID,
+    payload: BookingStatusUpdate | None = None,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    notes = payload.notes if payload else None
+    return await BookingService.start_appointment(booking_id, current_user.id, current_user.role, notes, db)
+
+
+@router.post("/{booking_id}/complete", response_model=BookingOut)
+async def complete_appointment(
+    booking_id: uuid.UUID,
+    payload: BookingStatusUpdate | None = None,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    notes = payload.notes if payload else None
+    return await BookingService.complete_appointment(booking_id, current_user.id, current_user.role, notes, db)
+
+
+@router.post("/{booking_id}/no-show", response_model=BookingOut)
+async def mark_no_show(
+    booking_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    return await BookingService.mark_no_show(booking_id, current_user.id, current_user.role, db)
 
 
 @router.get("/slots/available")
