@@ -1,154 +1,152 @@
 # MediFlow — Progress Log
 
-Living source of truth. Updated after every change — big or small.
+Living source of truth. Reflects current project state at all times.
 
 ---
 
 ## Status Legend
-- ✅ Done
+- ✅ Done + pushed to main
 - 🔄 In Progress
 - ⏳ Todo
 - ❌ Blocked
 
 ---
 
-## Completed
+## What's Built (pushed to main)
 
-### 2026-04-18
-- ✅ **Initial project built** — Full FastAPI backend with PostgreSQL, Redis, Alembic, Docker Compose
-- ✅ **Auth service** — JWT access tokens (15min TTL), refresh token rotation, family invalidation on reuse detection
-- ✅ **Booking service** — `SELECT FOR UPDATE SKIP LOCKED`, idempotency key table, Redis cache invalidation on booking
-- ✅ **Reports service** — Keyset pagination, Redis cache-aside (5m TTL, first page only)
-- ✅ **Admin endpoints** — Audit log (append-only trigger), slot management
-- ✅ **Observability** — Prometheus metrics, Grafana dashboard (auto-provisioned), structured JSON logging
-- ✅ **k6 load tests** — benchmark.js (full suite), contention_test.js (50-VU slot contention)
-- ✅ **Git initialized** — Repo pushed to https://github.com/hemanthballa07/mediflow.git
-- ✅ **`.gitignore` created** — Python, venv, .env, pycache, macOS, IDE patterns
-- ✅ **`CLAUDE.md` created** — Project context, conventions, commands for Claude sessions
-- ✅ **`PROGRESS.md` created** — This file; living log of all changes
-- ✅ **Security review** — 6 critical, 7 high, 8 medium, 4 low issues identified
-- ✅ **Python review** — 1 critical, 7 high, 8 medium, 4 low issues identified
-- ✅ **Phase F: admin slot pagination** (2026-04-18):
-  - `app/api/v1/endpoints/admin.py`: added `after_date: date | None` keyset cursor to `list_slots` — `WHERE date > after_date ORDER BY date, start_time LIMIT n`; caller uses last item's date as next cursor; `get_audit_log` already had `after_id` keyset pagination, no change needed
-  - 24/24 tests pass
-- ✅ **Phase E: Docker migration automation** (2026-04-18):
-  - `docker-compose.yml`: added `migrator` one-shot service (`alembic upgrade head`, `restart: no`); `api` now `depends_on: migrator: condition: service_completed_successfully` — API never starts if migrations fail
-  - `docker compose config` validates clean (pre-existing `version` obsolete warning only)
-  - **Follow-up:** Phase F (admin pagination), G (features) remain
-- ✅ **Phases A–D: health endpoint, config cleanup, slot validation, test expansion** (2026-04-18):
-  - `app/schemas/schemas.py`: added `HealthResponse` model
-  - `app/main.py`: upgraded `/health` stub to real DB (`SELECT 1`) + Redis (`PING`) checks; 200 healthy / 503 unhealthy; `response_model`
-  - `app/core/config.py`: added `REPORT_CACHE_TTL: int = 300`
-  - `app/services/reports.py`: replaced hardcoded `300` with `settings.REPORT_CACHE_TTL`
-  - `app/api/v1/endpoints/admin.py`: slot creation rejects `end_time <= start_time` and past dates with 422; fixed deprecated `HTTP_422_UNPROCESSABLE_ENTITY` → `HTTP_422_UNPROCESSABLE_CONTENT`
-  - `tests/test_core.py`: 11 new tests — health 200/503, slot validation, report TTL config, auth failures, booking cancellation (own/other/already-cancelled)
-  - Tests: 13 → 24 passing
-  - **Follow-up:** Phase E (migration automation), F (admin pagination), G (features) remain
-- ✅ **Block F: python-jose → PyJWT migration** (2026-04-18):
-  - `requirements.txt`: replaced `python-jose[cryptography]==3.3.0` with `PyJWT==2.10.0` — eliminates known CVEs (GHSA-cjwg-qfpm-7377, alg confusion)
-  - `app/core/security.py`: `from jose import JWTError, jwt` → `import jwt; from jwt.exceptions import InvalidTokenError`; updated docstring
-  - `app/api/v1/deps.py`: `from jose import JWTError` → `from jwt.exceptions import InvalidTokenError`; `except JWTError` → `except InvalidTokenError`
-  - PyJWT 2.x `encode`/`decode` API identical to python-jose for HS256; no behavior change
-  - All 13 tests pass
-  - **Follow-up risks**: `python-jose` still in venv until Docker rebuild; Docker image needs `pip install` with updated `requirements.txt`; slowapi deprecation warning remains (unrelated)
-- ✅ **Block E: pydantic-settings v2 migration + mock fix** (2026-04-18):
-  - `app/core/config.py`: replaced deprecated `class Config: env_file = ".env"` with `model_config = SettingsConfigDict(env_file=".env")` — eliminates pydantic-settings deprecation warning
-  - `tests/test_core.py`: added `mock_db.add = MagicMock()` in `test_token_reuse_detection_revokes_family` — `db.add()` is sync; `AsyncMock` auto-creating it caused "coroutine never awaited" warning
-  - `app/core/security.py`: verified `decode_access_token` uses `algorithms=[settings.JWT_ALGORITHM]` (list) — `python-jose` alg:none attack blocked; no change needed
-  - All 13 tests pass, 3 warnings remain (slowapi `asyncio.iscoroutinefunction` — unrelated to Block E)
-  - **Follow-up risks**: `python-jose` has known CVEs (alg confusion, GHSA-cjwg-qfpm-7377) — consider migrating to `PyJWT`; slowapi `asyncio.iscoroutinefunction` deprecated in Python 3.16 — upgrade slowapi before then
-- ✅ **Block D: test suite green + 3 new tests** (2026-04-18):
-  - Fixed local env blockers: `bcrypt==3.2.2` (passlib 1.7.4 incompatible with bcrypt 4.x), `sqlalchemy>=2.0.40` (2.0.36 broke on Python 3.14 `Union.__getitem__`), `requirements.txt` otel pins corrected (`1.28.4`→`1.28.0`, `0.49b4`→`0.49b0`)
-  - All 13 tests pass (`pytest tests/ -v`): 10 pre-existing + 3 new
-  - `tests/test_core.py`: added `test_get_available_slots_passes_string_date`, `test_register_rate_limit_enforced`, `test_report_page_next_cursor_defaults_none`
-  - **Follow-up risks**: venv uses bcrypt 3.2.2 + SQLAlchemy 2.0.49 while `requirements.txt` pins 4.0.1 + 2.0.36 — Docker (Python 3.12) unaffected; update production pins only after Docker build validated. Two warnings: `audit.py:24` `db.add` unawaited in mock tests (cosmetic); slowapi uses deprecated `asyncio.iscoroutinefunction` (removed Python 3.16 — upgrade slowapi then)
-- ✅ **Block C: rate limiting + date cast fix** (2026-04-18):
-  - `requirements.txt`: added `slowapi==0.1.9`
-  - `app/core/limiter.py`: created — `Limiter` instance backed by Redis (`REDIS_URL`)
-  - `app/main.py`: wired `app.state.limiter`, registered `RateLimitExceeded` → JSON 429 handler
-  - `app/api/v1/endpoints/auth.py`: `@limiter.limit` on register (10/min), login (5/min), refresh (20/min); added `request: Request` param
-  - `app/api/v1/endpoints/bookings.py`: `str(date)` cast before passing to `get_available_slots`
-  - **Follow-up risks**: run `pip install slowapi==0.1.9` or rebuild Docker image before testing; rate limit counts are per-IP so behind a proxy/load balancer you need `X-Forwarded-For` trust config; `limiter.py` calls `get_settings()` at import time — `conftest.py` env vars cover tests
-- ✅ **Block B remaining fixes** (2026-04-18):
-  - `.env.example` created — documents all required env vars with placeholder values
-  - `main.py`: CORS `allow_origins` restricted from `["*"]` to `["http://localhost:3000"]`
-  - `models/models.py`: all 8 `datetime.utcnow` → `lambda: datetime.now(timezone.utc)`; added `timezone` import
-  - `endpoints/bookings.py`: `date: str` → `date: date` with `from datetime import date`
-  - `schemas/schemas.py`: `ReportPage.next_cursor` now has `= None` default
-  - `tests/conftest.py` created — sets required env vars before pytest imports app modules
-  - **Follow-up risks**: `BookingService.get_available_slots` may still expect `str` for date — verify it handles `datetime.date`; CORS origin list hardcoded, update when frontend URL known
-- ✅ **Block B security fixes** (2026-04-18):
-  - `config.py`: `DATABASE_URL`, `JWT_SECRET`, `ADMIN_API_KEY` — removed all hardcoded defaults; now required env vars (startup fails if missing)
-  - `config.py`: added `@model_validator` — asserts `len(JWT_SECRET) >= 32` and `len(ADMIN_API_KEY) >= 32` at startup
-  - `admin.py`: `verify_admin_key` — replaced `!=` with `hmac.compare_digest` (eliminates timing side-channel)
-  - **Follow-up risks**: `.env` must be set before running; tests that instantiate `Settings()` without env vars will break — check test fixtures
-- ✅ **Block A security fixes** (2026-04-18):
-  - `schemas.py`: `RegisterRequest.role` → `Literal["patient", "doctor"]`; admin self-registration impossible
-  - `endpoints/reports.py`: `list_reports` enforces ownership — patients get 403 on other patient's `patient_id`
-  - `deps.py`: deleted broken `get_admin_user()` (returned `Depends()` object, never ran role check; zero callers)
-  - `tests/test_core.py`: 4 new tests covering all 3 fixes
+### Auth
+- ✅ JWT access tokens (15min) + refresh token rotation with family invalidation
+- ✅ Logout endpoint (revokes token family, idempotent)
+- ✅ Rate limiting on auth endpoints (slowapi + Redis, per-IP)
+- ✅ bcrypt password hashing
+
+### Multi-Tenant Data Model
+- ✅ `facilities` table — hospitals/clinics with timezone support
+- ✅ `specialties` table — Cardiology, Radiology, General Practice, etc.
+- ✅ `departments` table — scoped to facility + specialty
+- ✅ `rooms` table — exam/procedure/imaging/ward, scoped to facility + department
+- ✅ `doctors`, `slots`, `bookings`, `lab_reports` all FK'd to facility + department
+- ✅ `users.home_facility_id` FK
+- ✅ Catalog endpoints: `GET /catalog/specialties`, `/catalog/facilities`, `/catalog/facilities/{id}/departments`, `/catalog/doctors?facility_id=&department_id=&specialty_id=`
+- ✅ Admin catalog endpoints: `POST /admin/specialties`, `/admin/facilities`, `/admin/departments`, `/admin/rooms`
+
+### Booking System
+- ✅ `SELECT FOR UPDATE SKIP LOCKED` — concurrency-safe, no double-booking
+- ✅ Idempotency key table — replay-safe POST /bookings
+- ✅ Partial unique index on `bookings(slot_id) WHERE status = 'scheduled'`
+- ✅ Cancellation window enforcement (24h, configurable)
+- ✅ Per-user booking rate limit (JWT sub key, configurable via env)
+- ✅ Room double-booking prevention (range overlap query)
+
+### Clinical Scheduling (Phase 1)
+- ✅ `appointment_types` — duration, buffer, requires_referral, requires_fasting, color
+- ✅ `doctor_schedules` — recurring weekly availability with effective date range
+- ✅ `doctor_time_off` — blocks out time ranges for a doctor
+- ✅ Slot generator from schedules (`POST /admin/slots/generate`) — idempotent, respects time-off
+- ✅ Booking status machine: `scheduled → checked_in → in_progress → completed | no_show | cancelled`
+- ✅ Endpoints: `POST /bookings/{id}/check-in`, `/start`, `/complete`, `/no-show`
+- ✅ Admin: `POST /admin/doctors/{id}/schedule`, `/admin/doctors/{id}/time-off`, `/admin/appointment-types`
+
+### Reports
+- ✅ Lab reports scoped to facility + department
+- ✅ Keyset pagination, Redis cache-aside (5m TTL, first page only)
+- ✅ Ownership enforcement (patients see only their own reports)
+
+### Observability
+- ✅ Prometheus metrics: HTTP latency, booking counters, cache hits, auth failures, DB query histogram, no-show rate, check-in wait time, bookings by status
+- ✅ Grafana dashboard (auto-provisioned): HTTP + DB latency panels
+- ✅ Structured JSON logging
+- ✅ `/health` endpoint (DB + Redis liveness check)
+
+### Infrastructure
+- ✅ Docker Compose: postgres, redis, api, prometheus, grafana, migrator (one-shot)
+- ✅ Alembic migrations: 001_initial, 002_multi_tenant, 003_clinical_scheduling
+- ✅ Separate migrator service — API only starts after migrations succeed
+- ✅ Seed script: 2 facilities, 3 specialties, 4 departments, 5 rooms, 2 doctors, 1 patient
+
+### Security
+- ✅ PyJWT (replaced python-jose CVEs)
+- ✅ pydantic-settings v2
+- ✅ HMAC-safe admin key comparison
+- ✅ No hardcoded secrets — all required env vars
+- ✅ Role-scoped endpoints (patient/doctor/admin)
+
+### Tests
+- ✅ 27 unit tests (pytest)
+- ✅ 10 integration tests (live Docker stack)
+- ✅ k6 load tests: benchmark.js, contention_test.js
+- ✅ Contention test proven: 50 VUs, 1 booking through, 13,437 conflicts, 0 server errors
 
 ---
 
-- ✅ **k6 contention test results** (2026-04-19):
-  - 50 VUs hammering same slot for 30s — `SELECT FOR UPDATE SKIP LOCKED` proven correct
-  - `booking_success_total: 1` unique booking through (+ 2 idempotency replays = 3 counted)
-  - `booking_conflict_total: 13,437` — all other attempts correctly rejected at DB level
-  - `booking_5xx_total: 0` — zero server errors under full contention
-  - `http_req_duration p99: 158ms` — well under 300ms threshold even at 50 VUs
-  - `http_reqs: 13,938 @ 464 req/s` throughput
-  - Also: made `BOOKING_RATE_LIMIT` configurable via env (`app/core/config.py`); docker-compose sets `10000/second` for load testing, production default stays `10/hour`
-- ✅ **Logout endpoint + partial unique index fix** (2026-04-19):
-  - `app/services/auth.py`: `AuthService.logout(jti, db)` — revokes entire token family; idempotent (unknown JTI silently accepted); audit logs `LOGOUT` action
-  - `app/api/v1/endpoints/auth.py`: `POST /auth/logout` — takes `refresh_token`, returns `{"message": "Logged out successfully"}`
-  - `app/models/models.py` + `migrations/versions/001_initial.py`: replaced `UniqueConstraint("slot_id")` with partial unique index `WHERE status = 'active'` — allows rebooking after cancellation (was a design bug)
-  - `tests/test_integration.py`: `test_logout_revokes_refresh_token` — logout → refresh attempt 401 → second logout 200 (idempotent)
-  - 27 unit + 10 integration = 37 tests pass
-- ✅ **Grafana DB query latency panel** (2026-04-19):
-  - `deploy/grafana/dashboards/mediflow_overview.json`: added "Database" row + p50/p95/p99 latency timeseries + queries/s rate panel using `mediflow_db_query_duration_seconds`
-  - Grafana restarted to pick up provisioned dashboard
-- ✅ **Integration tests against live stack** (2026-04-19):
-  - `tests/test_integration.py`: 9 tests — health, auth failures (wrong pass/unknown email), `/me` profile, booking missing idempotency key 422, full booking flow (create→idempotency replay→cancel→cancel-again-409), report list own, admin key enforcement
-  - Session fixture flushes Redis before run to clear rate limit counters
-  - Slot fixture filters to ≥2 days from now to stay outside 24h cancellation window
-  - 9/9 pass; 27 unit + 9 integration = 36 total
-- ✅ **Docker smoke test + timezone fix** (2026-04-19):
-  - `app/models/models.py`: all `mapped_column(DateTime,` → `mapped_column(DateTime(timezone=True),` (10 columns)
-  - `migrations/versions/001_initial.py`: all `sa.DateTime,` → `sa.DateTime(timezone=True),` (11 columns → TIMESTAMPTZ)
-  - `migrations/env.py`: added `DATABASE_URL` env override so migrator uses Docker service hostname, not `localhost`
-  - `docker-compose.yml`: added `JWT_SECRET`/`ADMIN_API_KEY` placeholders to migrator; padded api `ADMIN_API_KEY` to ≥32 chars
-  - `make up && make seed` clean; `/health` returns `{"status":"ok","db":"ok","redis":"ok"}`; 27/27 tests pass
-- ✅ **Phase G tests: coverage for G.1/G.2/G.3** (2026-04-18):
-  - `tests/test_core.py`: 3 new tests — cancellation window 409 (1h-from-now slot), `get_user_id_from_request` extracts JWT sub, `db_query_duration_seconds` isinstance Histogram
-  - 24 → 27 tests pass
-- ✅ **Phase G.3: SQLAlchemy query latency histogram** (2026-04-18):
-  - `app/core/metrics.py`: added `db_query_duration_seconds` Histogram (`mediflow_db_query_duration_seconds`)
-  - `app/db/session.py`: `before_cursor_execute` / `after_cursor_execute` event hooks on `engine.sync_engine`; `time.perf_counter()` stacked per-connection; elapsed observed into histogram on completion
-  - 24/24 tests pass
-- ✅ **Phase G.2: Per-user booking rate limit** (2026-04-18):
-  - `app/core/limiter.py`: added `get_user_id_from_request` key function — decodes JWT Bearer token, extracts `sub` (user UUID); falls back to IP on failure
-  - `app/api/v1/endpoints/bookings.py`: `@limiter.limit("10/hour", key_func=get_user_id_from_request)` on `create_booking`; added `request: Request` first param (required by slowapi)
-  - 24/24 tests pass
-- ✅ **Phase G.1: Booking cancellation window** (2026-04-18):
-  - `app/core/config.py`: added `CANCELLATION_WINDOW_HOURS: int = 24`
-  - `app/services/booking.py`: `cancel_booking` loads slot before cancellation; combines `slot.date + slot.start_time` → UTC datetime; rejects 409 if `now >= appointment_dt - 24h`; slot reused for cache invalidation (no extra query)
-  - `tests/test_core.py`: fixed `test_cancel_booking_own_succeeds` — added `date`/`time` imports, proper typed slot fields, corrected `execute` side_effect order
-  - 24/24 tests pass
-
-## In Progress
+## Seeded Credentials
+| Role       | Email                        | Password    |
+|------------|------------------------------|-------------|
+| Admin      | admin@mediflow.dev           | admin123    |
+| Doctor GP  | doctor@mediflow.dev          | doctor123   |
+| Cardiolog. | cardiologist@mediflow.dev    | cardio123   |
+| Patient    | patient@mediflow.dev         | patient123  |
 
 ---
 
-## Todo
+## Planned — Not Started
 
-- ⏳ **Commit all Block A–F changes** — 12 files modified, uncommitted
-- ⏳ **slowapi deprecation** — `asyncio.iscoroutinefunction` removed in Python 3.16; upgrade slowapi when compatible version available
-- ⏳ **Expand test coverage** — auth rate limiting, slot date validation, report pagination edge cases
+### Phase 2 — Waitlist + Notifications
+- ⏳ `waitlist_entries` table — patient queues for department/appointment type
+- ⏳ `notifications` outbox table — email/SMS/push with retry
+- ⏳ `patient_preferences` — preferred channel, language, reminder timing
+- ⏳ Waitlist service — auto-promote on booking cancellation
+- ⏳ Notification worker — polls outbox, dispatches, retries
+- ⏳ Docker `worker` service + MailHog for dev email
+- ⏳ Migration 004
+
+### Phase 3 — Clinical Data (Encounters)
+- ⏳ `encounters`, `vitals`, `diagnoses`, `prescriptions`, `allergies`, `problem_list`
+- ⏳ Doctor chart view with access control
+- ⏳ All PHI reads → audit log
+
+### Phase 4 — Referrals + Orders
+- ⏳ `referrals` (cross-department patient routing)
+- ⏳ `orders` (lab/imaging/procedure)
+- ⏳ Link reports to orders
+
+### Phase 5 — Billing & Insurance (US)
+- ⏳ `insurance_plans`, `patient_insurance`, `charge_masters`, `claims`, `payments`
+- ⏳ CPT/ICD-10 codes
+- ⏳ Idempotent payment endpoint
+
+### Phase 6 — Compliance + Audit Hardening
+- ⏳ PHI access logging middleware
+- ⏳ Break-glass endpoint
+- ⏳ GDPR data export + delete request
+- ⏳ PII encryption at rest
+- ⏳ Password history + rotation
+
+### Phase 7 — Reliability + Tracing
+- ⏳ `/health/live` + `/health/ready` split
+- ⏳ OpenTelemetry → Tempo in Docker Compose
+- ⏳ Read replica routing
+- ⏳ Circuit breaker on Redis
+- ⏳ SLO burn-rate Grafana panels
+
+### Phase 8 — FHIR R4 + HL7
+- ⏳ `/fhir/r4/` read-only router (Patient, Practitioner, Appointment, Encounter, Observation, Condition, MedicationRequest, DiagnosticReport)
+- ⏳ CapabilityStatement
+- ⏳ Webhook system with HMAC signing + retry
+- ⏳ HL7 v2 ADT ingestion
 
 ---
 
-## How to Use This File
+## Key Commands
+```bash
+make up              # start all services (from worktree dir)
+make migrate         # run Alembic migrations
+make seed            # seed test data
+make test            # pytest
+make contention-test SLOT_ID=<id> TOKEN=<token>
+make logs            # follow API logs
+make clean           # stop + remove volumes
+```
 
-After every task, add an entry under **Completed** with the date and what changed.
-Move items: **Todo** → **In Progress** → **Completed** as work progresses.
-If blocked, mark ❌ and note why.
+## Next Migration
+Next file: `migrations/versions/004_waitlist_notifications.py`
