@@ -21,6 +21,13 @@ class Settings(BaseSettings):
     CANCELLATION_WINDOW_HOURS: int = 24
     BOOKING_RATE_LIMIT: str = "10/hour"
 
+    SMTP_HOST: str = "localhost"
+    SMTP_PORT: int = 1025
+    SMTP_FROM: str = "noreply@mediflow.dev"
+    NOTIFICATION_POLL_INTERVAL: int = 10
+    NOTIFICATION_BATCH_SIZE: int = 50
+    WAITLIST_NOTIFICATION_EXPIRY_HOURS: int = 48
+
     @model_validator(mode="after")
     def validate_secrets(self) -> "Settings":
         if len(self.JWT_SECRET) < 32:
