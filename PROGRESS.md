@@ -92,13 +92,17 @@ Living source of truth. Reflects current project state at all times.
 ## Planned — Not Started
 
 ### Phase 2 — Waitlist + Notifications
-- ⏳ `waitlist_entries` table — patient queues for department/appointment type
-- ⏳ `notifications` outbox table — email/SMS/push with retry
-- ⏳ `patient_preferences` — preferred channel, language, reminder timing
-- ⏳ Waitlist service — auto-promote on booking cancellation
-- ⏳ Notification worker — polls outbox, dispatches, retries
-- ⏳ Docker `worker` service + MailHog for dev email
-- ⏳ Migration 004
+- ✅ `waitlist_entries` table — patient queues for department/appointment type; statuses: waiting | notified | expired | cancelled
+- ✅ `notifications` outbox table — email/SMS/push with per-row retry tracking (attempts, next_attempt_at, error, context)
+- ✅ `patient_preferences` — preferred channel, language, reminder_hours_before[], per-channel toggles
+- ✅ Waitlist service — FIFO by priority then created_at; auto-promotes next waiting patient on booking cancellation
+- ✅ Notification worker (`worker/main.py`) — polls outbox every 10s, dispatches email via SMTP, SMS stub, exponential backoff (1/5/15 min), SELECT FOR UPDATE SKIP LOCKED
+- ✅ Docker `worker` service + `mailhog` service (SMTP :1025, Web UI :8025)
+- ✅ Migration 004 — `patient_preferences`, `waitlist_entries`, `notifications`
+- ✅ `POST /api/v1/bookings` now enqueues BOOKING_CONFIRMED email
+- ✅ `DELETE /api/v1/bookings/{id}` now enqueues BOOKING_CANCELLED email + triggers waitlist promotion
+- ✅ Endpoints: `POST/GET/DELETE /api/v1/waitlist`, `GET /api/v1/waitlist/{id}/position`
+- ✅ Endpoints: `GET/PUT /api/v1/preferences/me`
 
 ### Phase 3 — Clinical Data (Encounters)
 - ⏳ `encounters`, `vitals`, `diagnoses`, `prescriptions`, `allergies`, `problem_list`
@@ -149,4 +153,4 @@ make clean           # stop + remove volumes
 ```
 
 ## Next Migration
-Next file: `migrations/versions/004_waitlist_notifications.py`
+Next file: `migrations/versions/005_clinical_encounters.py`
