@@ -304,3 +304,74 @@ class MessageResponse(BaseModel):
 
 class ErrorResponse(BaseModel):
     detail: str
+
+
+# ── Waitlist ──────────────────────────────────────────────────────────────────
+
+class WaitlistEntryCreate(BaseModel):
+    department_id: uuid.UUID
+    appointment_type_id: uuid.UUID | None = None
+    doctor_id: uuid.UUID | None = None
+    notes: str | None = None
+
+
+class WaitlistEntryOut(BaseModel):
+    id: uuid.UUID
+    patient_id: uuid.UUID
+    department_id: uuid.UUID
+    appointment_type_id: uuid.UUID | None
+    doctor_id: uuid.UUID | None
+    status: str
+    priority: int
+    notes: str | None
+    expires_at: datetime | None
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class WaitlistPositionOut(BaseModel):
+    entry: WaitlistEntryOut
+    position: int
+
+
+# ── Patient Preferences ───────────────────────────────────────────────────────
+
+class PatientPreferenceOut(BaseModel):
+    id: uuid.UUID
+    user_id: uuid.UUID
+    preferred_channel: str
+    language: str
+    reminder_hours_before: list[int]
+    email_notifications: bool
+    sms_notifications: bool
+    push_notifications: bool
+
+    model_config = {"from_attributes": True}
+
+
+class PatientPreferenceUpdate(BaseModel):
+    preferred_channel: str | None = None     # email | sms | push
+    language: str | None = None
+    reminder_hours_before: list[int] | None = None
+    email_notifications: bool | None = None
+    sms_notifications: bool | None = None
+    push_notifications: bool | None = None
+
+
+# ── Notifications ─────────────────────────────────────────────────────────────
+
+class NotificationOut(BaseModel):
+    id: uuid.UUID
+    user_id: uuid.UUID
+    channel: str
+    type: str
+    subject: str | None
+    body: str
+    recipient: str
+    status: str
+    attempts: int
+    sent_at: datetime | None
+    created_at: datetime
+
+    model_config = {"from_attributes": True}

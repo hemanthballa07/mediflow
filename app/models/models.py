@@ -1,10 +1,10 @@
 import uuid
 from datetime import datetime, date, time, timezone
 from sqlalchemy import (
-    String, Text, Boolean, DateTime, Date, Time, Numeric,
+    String, Text, Boolean, DateTime, Date, Time, Numeric, Integer,
     ForeignKey, UniqueConstraint, Index, event, text
 )
-from sqlalchemy.dialects.postgresql import UUID, JSONB
+from sqlalchemy.dialects.postgresql import UUID, JSONB, ARRAY
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.db.session import Base
 
@@ -103,6 +103,15 @@ class User(Base):
     bookings: Mapped[list["Booking"]] = relationship("Booking", back_populates="user")
     lab_reports: Mapped[list["LabReport"]] = relationship("LabReport", back_populates="patient")
     refresh_tokens: Mapped[list["RefreshToken"]] = relationship("RefreshToken", back_populates="user")
+    preferences: Mapped["PatientPreference | None"] = relationship(
+        "PatientPreference", back_populates="user", uselist=False
+    )
+    waitlist_entries: Mapped[list["WaitlistEntry"]] = relationship(
+        "WaitlistEntry", back_populates="patient"
+    )
+    notifications: Mapped[list["Notification"]] = relationship(
+        "Notification", back_populates="user"
+    )
 
 
 # ─────────────────────────────────────────
@@ -315,3 +324,114 @@ class RefreshToken(Base):
     revoked: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
     user: Mapped["User"] = relationship("User", back_populates="refresh_tokens")
+
+
+# ─────────────────────────────────────────
+# Patient Preferences
+# ─────────────────────────────────────────
+class PatientPreference(Base):
+    __tablename__ = "patient_preferences"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id"), unique=True, nullable=False
+    )
+    preferred_channel: Mapped[str] = mapped_column(String(10), nullable=False, default="email")
+    language: Mapped[str] = mapped_column(String(10), nullable=False, default="en")
+    reminder_hours_before: Mapped[list[int]] = mapped_column(
+        ARRAY(Integer), nullable=False, default=lambda: [24, 2]
+    )
+    email_notifications: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    sms_notifications: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    push_notifications: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
+
+    user: Mapped["User"] = relationship("User", back_populates="preferences")
+
+
+# ─────────────────────────────────────────
+# Waitlist Entries
+# ─────────────────────────────────────────
+class WaitlistEntry(Base):
+    __tablename__ = "waitlist_entries"
+    __table_args__ = (
+        Index("ix_waitlist_dept_status_created", "department_id", "status", "created_at"),
+        Index("ix_waitlist_patient", "patient_id"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
+    patient_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id"), nullable=False
+    )
+    department_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("departments.id"), nullable=False
+    )
+    appointment_type_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("appointment_types.id"), nullable=True
+    )
+    doctor_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("doctors.id"), nullable=True
+    )
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="waiting")
+    # waiting | notified | expired | cancelled
+    priority: Mapped[int] = mapped_column(nullable=False, default=0)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
+
+    patient: Mapped["User"] = relationship("User", back_populates="waitlist_entries")
+    department: Mapped["Department"] = relationship("Department")
+    appointment_type: Mapped["AppointmentType | None"] = relationship("AppointmentType")
+    doctor: Mapped["Doctor | None"] = relationship("Doctor")
+
+
+# ─────────────────────────────────────────
+# Notifications Outbox
+# ─────────────────────────────────────────
+class Notification(Base):
+    __tablename__ = "notifications"
+    __table_args__ = (
+        Index(
+            "ix_notifications_pending_next", "status", "next_attempt_at",
+            postgresql_where=text("status = 'pending'"),
+        ),
+        Index("ix_notifications_user", "user_id"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id"), nullable=False
+    )
+    channel: Mapped[str] = mapped_column(String(10), nullable=False)   # email | sms | push
+    type: Mapped[str] = mapped_column(String(50), nullable=False)
+    subject: Mapped[str | None] = mapped_column(Text, nullable=True)
+    body: Mapped[str] = mapped_column(Text, nullable=False)
+    recipient: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="pending")
+    # pending | sent | failed | skipped
+    attempts: Mapped[int] = mapped_column(nullable=False, default=0)
+    max_attempts: Mapped[int] = mapped_column(nullable=False, default=3)
+    next_attempt_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
+    sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    context: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
+
+    user: Mapped["User"] = relationship("User", back_populates="notifications")
