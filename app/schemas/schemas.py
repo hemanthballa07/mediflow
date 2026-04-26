@@ -554,3 +554,209 @@ class PatientChartOut(BaseModel):
     allergies: list[AllergyOut] = []
     problem_list: list[ProblemOut] = []
     encounters: list[EncounterWithDetails] = []
+
+
+# ── Referrals ─────────────────────────────────────────────────────────────────
+
+class ReferralCreate(BaseModel):
+    patient_id: uuid.UUID
+    receiving_department_id: uuid.UUID
+    encounter_id: uuid.UUID | None = None
+    reason: str
+    urgency: Literal["routine", "urgent", "stat"] = "routine"
+    notes: str | None = None
+    referring_doctor_id: uuid.UUID | None = None  # admin only; doctors auto-resolved
+
+
+class ReferralOut(BaseModel):
+    id: uuid.UUID
+    patient_id: uuid.UUID
+    referring_doctor_id: uuid.UUID
+    receiving_department_id: uuid.UUID
+    encounter_id: uuid.UUID | None
+    reason: str
+    urgency: str
+    status: str
+    notes: str | None
+    referred_at: datetime
+    responded_at: datetime | None
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class ReferralStatusUpdate(BaseModel):
+    status: Literal["accepted", "rejected", "completed"]
+    notes: str | None = None
+
+
+# ── Orders ────────────────────────────────────────────────────────────────────
+
+class OrderCreate(BaseModel):
+    encounter_id: uuid.UUID
+    order_type: Literal["lab", "imaging", "procedure"]
+    cpt_code: str
+    description: str
+    priority: Literal["routine", "urgent", "stat"] = "routine"
+    notes: str | None = None
+    ordering_doctor_id: uuid.UUID | None = None  # admin only; doctors auto-resolved
+
+
+class OrderOut(BaseModel):
+    id: uuid.UUID
+    encounter_id: uuid.UUID
+    patient_id: uuid.UUID
+    ordering_doctor_id: uuid.UUID
+    order_type: str
+    cpt_code: str
+    description: str
+    status: str
+    priority: str
+    notes: str | None
+    ordered_at: datetime
+    resulted_at: datetime | None
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+# ── Billing — Insurance Plans ─────────────────────────────────────────────────
+
+class InsurancePlanCreate(BaseModel):
+    name: str
+    payer_id: str
+    plan_type: Literal["HMO", "PPO", "EPO", "POS", "HDHP"]
+
+
+class InsurancePlanOut(BaseModel):
+    id: uuid.UUID
+    name: str
+    payer_id: str
+    plan_type: str
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+# ── Billing — Patient Insurance ───────────────────────────────────────────────
+
+class PatientInsuranceCreate(BaseModel):
+    insurance_plan_id: uuid.UUID
+    member_id: str
+    group_number: str | None = None
+    effective_date: date
+    termination_date: date | None = None
+    is_primary: bool = True
+
+
+class PatientInsuranceOut(BaseModel):
+    id: uuid.UUID
+    patient_id: uuid.UUID
+    insurance_plan_id: uuid.UUID
+    member_id: str
+    group_number: str | None
+    effective_date: date
+    termination_date: date | None
+    is_primary: bool
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+# ── Billing — Charge Masters ──────────────────────────────────────────────────
+
+class ChargeMasterCreate(BaseModel):
+    cpt_code: str
+    description: str
+    base_price: float
+    department_id: uuid.UUID | None = None
+    active: bool = True
+
+
+class ChargeMasterOut(BaseModel):
+    id: uuid.UUID
+    cpt_code: str
+    description: str
+    base_price: float
+    department_id: uuid.UUID | None
+    active: bool
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+# ── Billing — Claims ──────────────────────────────────────────────────────────
+
+class ClaimLineItemCreate(BaseModel):
+    order_id: uuid.UUID | None = None
+    cpt_code: str
+    icd10_codes: list[str] = []
+    description: str
+    units: int = 1
+    unit_price: float | None = None
+
+
+class ClaimLineItemOut(BaseModel):
+    id: uuid.UUID
+    claim_id: uuid.UUID
+    order_id: uuid.UUID | None
+    cpt_code: str
+    icd10_codes: list[str]
+    description: str
+    units: int
+    unit_price: float
+    total_price: float
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class ClaimCreate(BaseModel):
+    encounter_id: uuid.UUID
+    patient_insurance_id: uuid.UUID
+    line_items: list[ClaimLineItemCreate]
+    ordering_doctor_id: uuid.UUID | None = None
+
+
+class ClaimOut(BaseModel):
+    id: uuid.UUID
+    patient_id: uuid.UUID
+    encounter_id: uuid.UUID
+    patient_insurance_id: uuid.UUID
+    ordering_doctor_id: uuid.UUID
+    status: str
+    total_charged: float
+    total_paid: float
+    submitted_at: datetime | None
+    adjudicated_at: datetime | None
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class ClaimDetailOut(ClaimOut):
+    line_items: list[ClaimLineItemOut] = []
+    payments: list["PaymentOut"] = []
+
+
+# ── Billing — Payments ────────────────────────────────────────────────────────
+
+class PaymentCreate(BaseModel):
+    payer: Literal["patient", "insurance"]
+    amount: float
+    payment_method: Literal["check", "eft", "card", "cash"]
+    reference_number: str | None = None
+    paid_at: datetime
+
+
+class PaymentOut(BaseModel):
+    id: uuid.UUID
+    claim_id: uuid.UUID
+    payer: str
+    amount: float
+    payment_method: str
+    reference_number: str | None
+    paid_at: datetime
+    created_at: datetime
+
+    model_config = {"from_attributes": True}

@@ -1029,3 +1029,620 @@ async def test_add_problem_defaults_to_active_status():
         call_kwargs = mock_pl_cls.call_args.kwargs
         assert call_kwargs["status"] == "active"
         assert call_kwargs["icd10_code"] == "I10"
+
+
+# ── Phase 4: Referrals ────────────────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_create_referral_as_doctor_resolves_doctor_id():
+    """create() for a doctor auto-resolves referring_doctor_id from their Doctor profile."""
+    from app.services.referrals import ReferralsService
+    from app.schemas.schemas import ReferralCreate
+    from app.models.models import Referral
+
+    doctor_user = MagicMock()
+    doctor_user.role = "doctor"
+    doctor_user.id = uuid.uuid4()
+
+    mock_doctor = MagicMock()
+    mock_doctor.id = uuid.uuid4()
+
+    mock_doctor_result = MagicMock()
+    mock_doctor_result.scalar_one_or_none.return_value = mock_doctor
+
+    created_ref = None
+
+    def capture(obj):
+        nonlocal created_ref
+        created_ref = obj
+
+    mock_db = AsyncMock()
+    mock_db.execute = AsyncMock(return_value=mock_doctor_result)
+    mock_db.add = MagicMock(side_effect=capture)
+    mock_db.flush = AsyncMock()
+    mock_db.refresh = AsyncMock(side_effect=lambda obj: None)
+
+    payload = ReferralCreate(
+        patient_id=uuid.uuid4(),
+        receiving_department_id=uuid.uuid4(),
+        reason="Cardiology follow-up",
+    )
+
+    with patch("app.services.referrals.Referral", wraps=Referral) as mock_ref_cls:
+        await ReferralsService.create(payload, doctor_user, mock_db)
+        call_kwargs = mock_ref_cls.call_args.kwargs
+        assert call_kwargs["referring_doctor_id"] == mock_doctor.id
+
+
+@pytest.mark.asyncio
+async def test_create_referral_admin_missing_doctor_id_raises_400():
+    """Admin creating a referral without referring_doctor_id gets 400."""
+    from fastapi import HTTPException
+    from app.services.referrals import ReferralsService
+    from app.schemas.schemas import ReferralCreate
+
+    admin_user = MagicMock()
+    admin_user.role = "admin"
+    admin_user.id = uuid.uuid4()
+
+    mock_db = AsyncMock()
+
+    payload = ReferralCreate(
+        patient_id=uuid.uuid4(),
+        receiving_department_id=uuid.uuid4(),
+        reason="Needs specialist",
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        await ReferralsService.create(payload, admin_user, mock_db)
+
+    assert exc_info.value.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_referral_status_update_sets_responded_at():
+    """update_status sets responded_at when status changes from pending."""
+    from app.services.referrals import ReferralsService
+    from app.schemas.schemas import ReferralStatusUpdate
+
+    doctor_user = MagicMock()
+    doctor_user.role = "admin"
+    doctor_user.id = uuid.uuid4()
+
+    dept_id = uuid.uuid4()
+    mock_ref = MagicMock()
+    mock_ref.id = uuid.uuid4()
+    mock_ref.status = "pending"
+    mock_ref.receiving_department_id = dept_id
+    mock_ref.responded_at = None
+
+    mock_ref_result = MagicMock()
+    mock_ref_result.scalar_one_or_none.return_value = mock_ref
+
+    mock_db = AsyncMock()
+    mock_db.execute = AsyncMock(return_value=mock_ref_result)
+    mock_db.add = MagicMock()
+    mock_db.flush = AsyncMock()
+    mock_db.refresh = AsyncMock(side_effect=lambda obj: None)
+
+    payload = ReferralStatusUpdate(status="accepted")
+    await ReferralsService.update_status(mock_ref.id, payload, doctor_user, mock_db)
+
+    assert mock_ref.status == "accepted"
+    assert mock_ref.responded_at is not None
+
+
+@pytest.mark.asyncio
+async def test_referral_invalid_status_transition_raises_422():
+    """Transitioning from 'rejected' raises 422."""
+    from fastapi import HTTPException
+    from app.services.referrals import ReferralsService
+    from app.schemas.schemas import ReferralStatusUpdate
+
+    admin_user = MagicMock()
+    admin_user.role = "admin"
+
+    mock_ref = MagicMock()
+    mock_ref.status = "rejected"
+
+    mock_ref_result = MagicMock()
+    mock_ref_result.scalar_one_or_none.return_value = mock_ref
+
+    mock_db = AsyncMock()
+    mock_db.execute = AsyncMock(return_value=mock_ref_result)
+
+    payload = ReferralStatusUpdate(status="accepted")
+
+    with pytest.raises(HTTPException) as exc_info:
+        await ReferralsService.update_status(uuid.uuid4(), payload, admin_user, mock_db)
+
+    assert exc_info.value.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_referral_received_doctor_no_department_returns_empty():
+    """Doctor with no department_id gets empty list from list_received."""
+    from app.services.referrals import ReferralsService
+
+    doctor_user = MagicMock()
+    doctor_user.role = "doctor"
+    doctor_user.id = uuid.uuid4()
+
+    mock_doctor = MagicMock()
+    mock_doctor.department_id = None
+
+    mock_doctor_result = MagicMock()
+    mock_doctor_result.scalar_one_or_none.return_value = mock_doctor
+
+    mock_db = AsyncMock()
+    mock_db.execute = AsyncMock(return_value=mock_doctor_result)
+
+    result = await ReferralsService.list_received(doctor_user, mock_db)
+    assert result == []
+
+
+# ── Phase 4: Orders ───────────────────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_create_order_patient_derived_from_encounter():
+    """create() derives patient_id from the encounter, not the payload."""
+    from app.services.orders import OrdersService
+    from app.schemas.schemas import OrderCreate
+    from app.models.models import Order
+
+    doctor_user = MagicMock()
+    doctor_user.role = "doctor"
+    doctor_user.id = uuid.uuid4()
+
+    patient_id = uuid.uuid4()
+    encounter_id = uuid.uuid4()
+
+    mock_enc = MagicMock()
+    mock_enc.id = encounter_id
+    mock_enc.patient_id = patient_id
+
+    mock_doctor = MagicMock()
+    mock_doctor.id = uuid.uuid4()
+
+    mock_enc_result = MagicMock()
+    mock_enc_result.scalar_one_or_none.return_value = mock_enc
+
+    mock_doctor_result = MagicMock()
+    mock_doctor_result.scalar_one_or_none.return_value = mock_doctor
+
+    mock_db = AsyncMock()
+    mock_db.execute = AsyncMock(side_effect=[mock_enc_result, mock_doctor_result])
+    mock_db.add = MagicMock()
+    mock_db.flush = AsyncMock()
+    mock_db.refresh = AsyncMock(side_effect=lambda obj: None)
+
+    payload = OrderCreate(
+        encounter_id=encounter_id,
+        order_type="lab",
+        cpt_code="80053",
+        description="Comprehensive metabolic panel",
+    )
+
+    with patch("app.services.orders.Order", wraps=Order) as mock_order_cls:
+        await OrdersService.create(payload, doctor_user, mock_db)
+        call_kwargs = mock_order_cls.call_args.kwargs
+        assert call_kwargs["patient_id"] == patient_id
+
+
+@pytest.mark.asyncio
+async def test_get_order_patient_role_raises_403():
+    """Patient calling OrdersService.get() always gets 403."""
+    from fastapi import HTTPException
+    from app.services.orders import OrdersService
+
+    patient_user = MagicMock()
+    patient_user.role = "patient"
+
+    mock_db = AsyncMock()
+
+    with pytest.raises(HTTPException) as exc_info:
+        await OrdersService.get(uuid.uuid4(), patient_user, mock_db)
+
+    assert exc_info.value.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_get_order_wrong_doctor_returns_404():
+    """Doctor who did not place the order gets 404 (existence masking)."""
+    from fastapi import HTTPException
+    from app.services.orders import OrdersService
+
+    doctor_user = MagicMock()
+    doctor_user.role = "doctor"
+    doctor_user.id = uuid.uuid4()
+
+    other_doctor_id = uuid.uuid4()
+    my_doctor_id = uuid.uuid4()
+
+    mock_order = MagicMock()
+    mock_order.ordering_doctor_id = other_doctor_id
+
+    mock_doctor = MagicMock()
+    mock_doctor.id = my_doctor_id
+
+    mock_order_result = MagicMock()
+    mock_order_result.scalar_one_or_none.return_value = mock_order
+
+    mock_doctor_result = MagicMock()
+    mock_doctor_result.scalar_one_or_none.return_value = mock_doctor
+
+    mock_db = AsyncMock()
+    mock_db.execute = AsyncMock(side_effect=[mock_order_result, mock_doctor_result])
+    mock_db.add = MagicMock()
+    mock_db.flush = AsyncMock()
+
+    with pytest.raises(HTTPException) as exc_info:
+        await OrdersService.get(uuid.uuid4(), doctor_user, mock_db)
+
+    assert exc_info.value.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_get_order_writes_audit_log():
+    """Successful order GET writes an audit log entry."""
+    from app.services.orders import OrdersService
+
+    admin_user = MagicMock()
+    admin_user.role = "admin"
+    admin_user.id = uuid.uuid4()
+
+    order_id = uuid.uuid4()
+    mock_order = MagicMock()
+    mock_order.id = order_id
+
+    mock_order_result = MagicMock()
+    mock_order_result.scalar_one_or_none.return_value = mock_order
+
+    mock_db = AsyncMock()
+    mock_db.execute = AsyncMock(return_value=mock_order_result)
+    mock_db.add = MagicMock()
+    mock_db.flush = AsyncMock()
+
+    with patch("app.services.orders.AuditService.log", new=AsyncMock()) as mock_audit:
+        await OrdersService.get(order_id, admin_user, mock_db)
+        mock_audit.assert_awaited_once()
+        call_kwargs = mock_audit.call_args.kwargs
+        assert call_kwargs["action"] == "ORDER_ACCESSED"
+        assert call_kwargs["target"] == str(order_id)
+
+
+@pytest.mark.asyncio
+async def test_list_encounter_orders_patient_raises_403():
+    """Patient calling list_for_encounter always gets 403."""
+    from fastapi import HTTPException
+    from app.services.orders import OrdersService
+
+    patient_user = MagicMock()
+    patient_user.role = "patient"
+
+    mock_db = AsyncMock()
+
+    with pytest.raises(HTTPException) as exc_info:
+        await OrdersService.list_for_encounter(uuid.uuid4(), patient_user, mock_db)
+
+    assert exc_info.value.status_code == 403
+
+
+# ── Phase 5: Billing ──────────────────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_insurance_plan_schema_rejects_invalid_plan_type():
+    """InsurancePlanCreate rejects unknown plan types."""
+    from pydantic import ValidationError
+    from app.schemas.schemas import InsurancePlanCreate
+
+    with pytest.raises(ValidationError):
+        InsurancePlanCreate(name="Test Plan", payer_id="12345", plan_type="HMX")
+
+
+def test_insurance_plan_schema_accepts_valid_types():
+    """InsurancePlanCreate accepts all valid US plan types."""
+    from app.schemas.schemas import InsurancePlanCreate
+
+    for plan_type in ("HMO", "PPO", "EPO", "POS", "HDHP"):
+        plan = InsurancePlanCreate(name="Test", payer_id="12345", plan_type=plan_type)
+        assert plan.plan_type == plan_type
+
+
+@pytest.mark.asyncio
+async def test_attach_insurance_patient_cross_access_raises_403():
+    """A patient cannot attach insurance to another patient."""
+    from fastapi import HTTPException
+    from app.services.insurance import InsuranceService
+    from app.schemas.schemas import PatientInsuranceCreate
+
+    patient_user = MagicMock()
+    patient_user.role = "patient"
+    patient_user.id = uuid.uuid4()
+
+    mock_db = AsyncMock()
+
+    payload = PatientInsuranceCreate(
+        insurance_plan_id=uuid.uuid4(),
+        member_id="M123",
+        effective_date=date(2026, 1, 1),
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        await InsuranceService.attach_to_patient(
+            patient_id=uuid.uuid4(),  # different from patient_user.id
+            payload=payload,
+            current_user=patient_user,
+            db=mock_db,
+        )
+
+    assert exc_info.value.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_attach_insurance_rejects_bad_date_range():
+    """termination_date < effective_date raises 400."""
+    from fastapi import HTTPException
+    from app.services.insurance import InsuranceService
+    from app.schemas.schemas import PatientInsuranceCreate
+
+    admin_user = MagicMock()
+    admin_user.role = "admin"
+    admin_user.id = uuid.uuid4()
+
+    patient_id = uuid.uuid4()
+
+    mock_patient = MagicMock()
+    mock_patient.role = "patient"
+    mock_patient_result = MagicMock()
+    mock_patient_result.scalar_one_or_none.return_value = mock_patient
+
+    mock_plan_result = MagicMock()
+    mock_plan_result.scalar_one_or_none.return_value = MagicMock()
+
+    mock_db = AsyncMock()
+    mock_db.execute = AsyncMock(side_effect=[mock_patient_result, mock_plan_result])
+
+    payload = PatientInsuranceCreate(
+        insurance_plan_id=uuid.uuid4(),
+        member_id="M123",
+        effective_date=date(2026, 6, 1),
+        termination_date=date(2026, 1, 1),  # before effective
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        await InsuranceService.attach_to_patient(
+            patient_id=patient_id,
+            payload=payload,
+            current_user=admin_user,
+            db=mock_db,
+        )
+
+    assert exc_info.value.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_create_claim_missing_line_items_raises_400():
+    """ClaimsService.create() with empty line_items raises 400."""
+    from fastapi import HTTPException
+    from app.services.claims import ClaimsService
+    from app.schemas.schemas import ClaimCreate
+
+    doctor_user = MagicMock()
+    doctor_user.role = "doctor"
+    doctor_user.id = uuid.uuid4()
+
+    encounter_id = uuid.uuid4()
+    mock_enc = MagicMock()
+    mock_enc.id = encounter_id
+    mock_enc.patient_id = uuid.uuid4()
+
+    mock_enc_result = MagicMock()
+    mock_enc_result.scalar_one_or_none.return_value = mock_enc
+
+    mock_ins_result = MagicMock()
+    mock_ins = MagicMock()
+    mock_ins.patient_id = mock_enc.patient_id
+    mock_ins_result.scalar_one_or_none.return_value = mock_ins
+
+    mock_doctor = MagicMock()
+    mock_doctor.id = uuid.uuid4()
+    mock_doctor_result = MagicMock()
+    mock_doctor_result.scalar_one_or_none.return_value = mock_doctor
+
+    mock_db = AsyncMock()
+    mock_db.execute = AsyncMock(side_effect=[mock_enc_result, mock_ins_result, mock_doctor_result])
+
+    payload = ClaimCreate(
+        encounter_id=encounter_id,
+        patient_insurance_id=uuid.uuid4(),
+        line_items=[],
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        await ClaimsService.create(payload, doctor_user, mock_db)
+
+    assert exc_info.value.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_submit_claim_non_draft_raises_409():
+    """submit() on a non-draft claim raises 409."""
+    from fastapi import HTTPException
+    from app.services.claims import ClaimsService
+
+    doctor_user = MagicMock()
+    doctor_user.role = "admin"
+    doctor_user.id = uuid.uuid4()
+
+    mock_claim = MagicMock()
+    mock_claim.status = "submitted"
+    mock_claim.ordering_doctor_id = uuid.uuid4()
+
+    mock_claim_result = MagicMock()
+    mock_claim_result.scalar_one_or_none.return_value = mock_claim
+
+    mock_db = AsyncMock()
+    mock_db.execute = AsyncMock(return_value=mock_claim_result)
+    mock_db.flush = AsyncMock()
+
+    with pytest.raises(HTTPException) as exc_info:
+        await ClaimsService.submit(uuid.uuid4(), doctor_user, mock_db)
+
+    assert exc_info.value.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_get_claim_patient_sees_only_own():
+    """Patient requesting another patient's claim gets 404."""
+    from fastapi import HTTPException
+    from app.services.claims import ClaimsService
+
+    patient_user = MagicMock()
+    patient_user.role = "patient"
+    patient_user.id = uuid.uuid4()
+
+    mock_claim = MagicMock()
+    mock_claim.patient_id = uuid.uuid4()  # different owner
+    mock_claim.ordering_doctor_id = uuid.uuid4()
+
+    mock_claim_result = MagicMock()
+    mock_claim_result.scalar_one_or_none.return_value = mock_claim
+
+    mock_db = AsyncMock()
+    mock_db.execute = AsyncMock(return_value=mock_claim_result)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await ClaimsService.get(uuid.uuid4(), patient_user, mock_db)
+
+    assert exc_info.value.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_get_claim_wrong_doctor_returns_404():
+    """Doctor who did not create the claim gets 404 (masking)."""
+    from fastapi import HTTPException
+    from app.services.claims import ClaimsService
+
+    doctor_user = MagicMock()
+    doctor_user.role = "doctor"
+    doctor_user.id = uuid.uuid4()
+
+    my_doctor_id = uuid.uuid4()
+    other_doctor_id = uuid.uuid4()
+
+    mock_claim = MagicMock()
+    mock_claim.patient_id = uuid.uuid4()
+    mock_claim.ordering_doctor_id = other_doctor_id
+
+    mock_claim_result = MagicMock()
+    mock_claim_result.scalar_one_or_none.return_value = mock_claim
+
+    mock_doctor = MagicMock()
+    mock_doctor.id = my_doctor_id
+
+    mock_doctor_result = MagicMock()
+    mock_doctor_result.scalar_one_or_none.return_value = mock_doctor
+
+    mock_db = AsyncMock()
+    mock_db.execute = AsyncMock(side_effect=[mock_claim_result, mock_doctor_result])
+
+    with pytest.raises(HTTPException) as exc_info:
+        await ClaimsService.get(uuid.uuid4(), doctor_user, mock_db)
+
+    assert exc_info.value.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_payment_idempotency_replay_returns_cached():
+    """Same Idempotency-Key replays cached PaymentOut without creating new payment."""
+    from app.services.payments import PaymentsService
+    from app.schemas.schemas import PaymentCreate
+
+    admin_user = MagicMock()
+    admin_user.id = uuid.uuid4()
+    admin_user.role = "admin"
+
+    payment_id = uuid.uuid4()
+    claim_id = uuid.uuid4()
+    cached_response = {
+        "id": str(payment_id),
+        "claim_id": str(claim_id),
+        "payer": "insurance",
+        "amount": 150.0,
+        "payment_method": "eft",
+        "reference_number": "REF001",
+        "paid_at": "2026-04-26T12:00:00+00:00",
+        "created_at": "2026-04-26T12:00:00+00:00",
+    }
+
+    mock_idem = MagicMock()
+    mock_idem.status = "SUCCESS"
+    mock_idem.response = cached_response
+
+    mock_idem_result = MagicMock()
+    mock_idem_result.scalar_one_or_none.return_value = mock_idem
+
+    mock_db = AsyncMock()
+    mock_db.execute = AsyncMock(return_value=mock_idem_result)
+
+    payload = PaymentCreate(
+        payer="insurance",
+        amount=150.0,
+        payment_method="eft",
+        paid_at=datetime(2026, 4, 26, 12, 0, tzinfo=timezone.utc),
+    )
+
+    out, http_status = await PaymentsService.record_payment(
+        claim_id=claim_id,
+        payload=payload,
+        idempotency_key="test-idem-key",
+        current_user=admin_user,
+        db=mock_db,
+    )
+
+    assert http_status == 200
+    assert str(out.id) == str(payment_id)
+
+
+@pytest.mark.asyncio
+async def test_payment_schema_rejects_invalid_payer():
+    """PaymentCreate rejects invalid payer values."""
+    from pydantic import ValidationError
+    from app.schemas.schemas import PaymentCreate
+
+    with pytest.raises(ValidationError):
+        PaymentCreate(
+            payer="hospital",  # invalid
+            amount=100.0,
+            payment_method="check",
+            paid_at=datetime(2026, 4, 26, 12, 0, tzinfo=timezone.utc),
+        )
+
+
+@pytest.mark.asyncio
+async def test_charge_master_service_create():
+    """ChargeMasterService.create inserts an entry with correct fields."""
+    from app.services.charge_master import ChargeMasterService
+    from app.schemas.schemas import ChargeMasterCreate
+    from app.models.models import ChargeMaster
+
+    mock_entry = MagicMock()
+
+    mock_db = AsyncMock()
+    mock_db.add = MagicMock()
+    mock_db.flush = AsyncMock()
+    mock_db.refresh = AsyncMock(side_effect=lambda obj: None)
+
+    payload = ChargeMasterCreate(
+        cpt_code="99213",
+        description="Office visit, established patient",
+        base_price=150.00,
+    )
+
+    with patch("app.services.charge_master.ChargeMaster", return_value=mock_entry) as mock_cls:
+        result = await ChargeMasterService.create(payload, mock_db)
+        call_kwargs = mock_cls.call_args.kwargs
+        assert call_kwargs["cpt_code"] == "99213"
+        assert call_kwargs["base_price"] == 150.00
+    assert result is mock_entry

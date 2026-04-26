@@ -265,12 +265,14 @@ class LabReport(Base):
     patient_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
     facility_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("facilities.id"), nullable=True)
     department_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("departments.id"), nullable=True)
+    order_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("orders.id"), nullable=True)
     report_type: Mapped[str] = mapped_column(String(50), nullable=False)   # blood | xray | urine | etc.
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="PENDING")  # PENDING | READY | ARCHIVED
     data: Mapped[str | None] = mapped_column(Text, nullable=True)          # report content / reference
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
 
     patient: Mapped["User"] = relationship("User", back_populates="lab_reports")
+    order: Mapped["Order | None"] = relationship("Order", back_populates="lab_reports")
 
 
 # ─────────────────────────────────────────
@@ -608,3 +610,207 @@ class ProblemList(Base):
 
     patient: Mapped["User"] = relationship("User", foreign_keys=[patient_id])
     noter: Mapped["User"] = relationship("User", foreign_keys=[noted_by])
+
+
+# ─────────────────────────────────────────
+# Orders
+# ─────────────────────────────────────────
+class Order(Base):
+    __tablename__ = "orders"
+    __table_args__ = (
+        Index("ix_orders_encounter", "encounter_id"),
+        Index("ix_orders_patient", "patient_id"),
+        Index("ix_orders_status", "status"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
+    encounter_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("encounters.id"), nullable=False)
+    patient_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    ordering_doctor_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("doctors.id"), nullable=False)
+    order_type: Mapped[str] = mapped_column(String(20), nullable=False)
+    cpt_code: Mapped[str] = mapped_column(String(10), nullable=False)
+    description: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="pending")
+    priority: Mapped[str] = mapped_column(String(10), nullable=False, default="routine")
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    ordered_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+    resulted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+
+    encounter: Mapped["Encounter"] = relationship("Encounter")
+    patient: Mapped["User"] = relationship("User", foreign_keys=[patient_id])
+    ordering_doctor: Mapped["Doctor"] = relationship("Doctor")
+    lab_reports: Mapped[list["LabReport"]] = relationship("LabReport", back_populates="order")
+
+
+# ─────────────────────────────────────────
+# Referrals
+# ─────────────────────────────────────────
+class Referral(Base):
+    __tablename__ = "referrals"
+    __table_args__ = (
+        Index("ix_referrals_patient", "patient_id"),
+        Index("ix_referrals_referring_doctor", "referring_doctor_id"),
+        Index("ix_referrals_receiving_dept_status", "receiving_department_id", "status"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
+    patient_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    referring_doctor_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("doctors.id"), nullable=False)
+    receiving_department_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("departments.id"), nullable=False)
+    encounter_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("encounters.id"), nullable=True)
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+    urgency: Mapped[str] = mapped_column(String(10), nullable=False, default="routine")
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="pending")
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    referred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+    responded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+
+    patient: Mapped["User"] = relationship("User", foreign_keys=[patient_id])
+    referring_doctor: Mapped["Doctor"] = relationship("Doctor", foreign_keys=[referring_doctor_id])
+    receiving_department: Mapped["Department"] = relationship("Department")
+    encounter: Mapped["Encounter | None"] = relationship("Encounter")
+
+
+# ─────────────────────────────────────────
+# Insurance Plans
+# ─────────────────────────────────────────
+class InsurancePlan(Base):
+    __tablename__ = "insurance_plans"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    payer_id: Mapped[str] = mapped_column(String(50), nullable=False)
+    plan_type: Mapped[str] = mapped_column(String(10), nullable=False)
+    # HMO | PPO | EPO | POS | HDHP
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+
+    patient_policies: Mapped[list["PatientInsurance"]] = relationship("PatientInsurance", back_populates="insurance_plan")
+
+
+# ─────────────────────────────────────────
+# Patient Insurance
+# ─────────────────────────────────────────
+class PatientInsurance(Base):
+    __tablename__ = "patient_insurance"
+    __table_args__ = (
+        Index("ix_patient_insurance_patient", "patient_id"),
+        Index(
+            "uq_patient_primary_insurance", "patient_id",
+            unique=True,
+            postgresql_where=text("is_primary = true"),
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
+    patient_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    insurance_plan_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("insurance_plans.id"), nullable=False)
+    member_id: Mapped[str] = mapped_column(String(100), nullable=False)
+    group_number: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    effective_date: Mapped[date] = mapped_column(Date, nullable=False)
+    termination_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    is_primary: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+
+    patient: Mapped["User"] = relationship("User", foreign_keys=[patient_id])
+    insurance_plan: Mapped["InsurancePlan"] = relationship("InsurancePlan", back_populates="patient_policies")
+    claims: Mapped[list["Claim"]] = relationship("Claim", back_populates="patient_insurance")
+
+
+# ─────────────────────────────────────────
+# Charge Masters (CPT pricing)
+# ─────────────────────────────────────────
+class ChargeMaster(Base):
+    __tablename__ = "charge_masters"
+    __table_args__ = (
+        Index("ix_charge_masters_cpt", "cpt_code"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
+    cpt_code: Mapped[str] = mapped_column(String(10), nullable=False)
+    description: Mapped[str] = mapped_column(Text, nullable=False)
+    base_price: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False)
+    department_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("departments.id"), nullable=True)
+    active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+
+    department: Mapped["Department | None"] = relationship("Department")
+
+
+# ─────────────────────────────────────────
+# Claims
+# ─────────────────────────────────────────
+class Claim(Base):
+    __tablename__ = "claims"
+    __table_args__ = (
+        Index("ix_claims_patient_status", "patient_id", "status"),
+        Index("ix_claims_encounter", "encounter_id"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
+    patient_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    encounter_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("encounters.id"), nullable=False)
+    patient_insurance_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("patient_insurance.id"), nullable=False)
+    ordering_doctor_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("doctors.id"), nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="draft")
+    # draft | submitted | accepted | rejected | paid
+    total_charged: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False)
+    total_paid: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False, default=0)
+    submitted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    adjudicated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+
+    patient: Mapped["User"] = relationship("User", foreign_keys=[patient_id])
+    encounter: Mapped["Encounter"] = relationship("Encounter")
+    patient_insurance: Mapped["PatientInsurance"] = relationship("PatientInsurance", back_populates="claims")
+    ordering_doctor: Mapped["Doctor"] = relationship("Doctor")
+    line_items: Mapped[list["ClaimLineItem"]] = relationship("ClaimLineItem", back_populates="claim", cascade="all, delete-orphan")
+    payments: Mapped[list["Payment"]] = relationship("Payment", back_populates="claim")
+
+
+# ─────────────────────────────────────────
+# Claim Line Items
+# ─────────────────────────────────────────
+class ClaimLineItem(Base):
+    __tablename__ = "claim_line_items"
+    __table_args__ = (
+        Index("ix_claim_line_items_claim", "claim_id"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
+    claim_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("claims.id"), nullable=False)
+    order_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("orders.id"), nullable=True)
+    cpt_code: Mapped[str] = mapped_column(String(10), nullable=False)
+    icd10_codes: Mapped[list[str]] = mapped_column(ARRAY(String), nullable=False, default=list)
+    description: Mapped[str] = mapped_column(Text, nullable=False)
+    units: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    unit_price: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False)
+    total_price: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+
+    claim: Mapped["Claim"] = relationship("Claim", back_populates="line_items")
+    order: Mapped["Order | None"] = relationship("Order")
+
+
+# ─────────────────────────────────────────
+# Payments
+# ─────────────────────────────────────────
+class Payment(Base):
+    __tablename__ = "payments"
+    __table_args__ = (
+        Index("ix_payments_claim", "claim_id"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
+    claim_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("claims.id"), nullable=False)
+    payer: Mapped[str] = mapped_column(String(20), nullable=False)
+    # patient | insurance
+    amount: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False)
+    payment_method: Mapped[str] = mapped_column(String(10), nullable=False)
+    # check | eft | card | cash
+    reference_number: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    paid_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+
+    claim: Mapped["Claim"] = relationship("Claim", back_populates="payments")
