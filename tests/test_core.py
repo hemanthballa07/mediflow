@@ -4,7 +4,7 @@ Run: pytest tests/ -v
 """
 import pytest
 import uuid
-from datetime import date, time
+from datetime import date, time, datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 from pydantic import ValidationError
 from app.core.security import (
@@ -100,7 +100,14 @@ async def test_idempotency_replay_returns_cached_response():
         "id": str(booking_id),
         "user_id": str(user_id),
         "slot_id": str(slot_id),
-        "status": "active",
+        "appointment_type_id": None,
+        "room_id": None,
+        "status": "scheduled",
+        "reason_for_visit": None,
+        "notes": None,
+        "checked_in_at": None,
+        "started_at": None,
+        "completed_at": None,
         "created_at": "2026-01-01T00:00:00",
     }
 
@@ -520,20 +527,43 @@ async def test_cancel_booking_own_succeeds():
     booking.id = booking_id
     booking.user_id = user_id
     booking.slot_id = slot_id
-    booking.status = "active"
+    booking.status = "scheduled"
+    booking.appointment_type_id = None
+    booking.room_id = None
+    booking.reason_for_visit = None
+    booking.notes = None
+    booking.checked_in_at = None
+    booking.started_at = None
+    booking.completed_at = None
+    booking.created_at = datetime(2026, 6, 1, 0, 0, tzinfo=timezone.utc)
 
     slot = MagicMock()
     slot.doctor_id = uuid.uuid4()
     slot.date = date(2026, 6, 15)
     slot.start_time = time(9, 0)
 
+    mock_user = MagicMock()
+    mock_user.email = "patient@test.dev"
+    mock_user.name = "Test Patient"
+
     mock_result_booking = MagicMock()
     mock_result_booking.scalar_one_or_none.return_value = booking
     mock_result_slot = MagicMock()
     mock_result_slot.scalar_one_or_none.return_value = slot
+    mock_result_user = MagicMock()
+    mock_result_user.scalar_one_or_none.return_value = mock_user
+    # promote_next: no waiting entries
+    mock_result_waitlist = MagicMock()
+    mock_result_waitlist.scalars.return_value.first.return_value = None
 
     mock_db = AsyncMock()
-    mock_db.execute = AsyncMock(side_effect=[mock_result_booking, mock_result_slot, AsyncMock()])
+    mock_db.execute = AsyncMock(side_effect=[
+        mock_result_booking,   # select(Booking)
+        mock_result_slot,      # select(Slot) for cancellation window
+        AsyncMock(),           # UPDATE slots SET status = 'available'
+        mock_result_user,      # select(User) for notification
+        mock_result_waitlist,  # select(WaitlistEntry) in promote_next
+    ])
     mock_db.add = MagicMock()
     mock_db.flush = AsyncMock()
     mock_db.commit = AsyncMock()
