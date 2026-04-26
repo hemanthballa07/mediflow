@@ -435,3 +435,176 @@ class Notification(Base):
     )
 
     user: Mapped["User"] = relationship("User", back_populates="notifications")
+
+
+# ─────────────────────────────────────────
+# Encounters
+# ─────────────────────────────────────────
+class Encounter(Base):
+    __tablename__ = "encounters"
+    __table_args__ = (
+        Index("ix_encounters_patient_date", "patient_id", "encounter_date"),
+        Index("ix_encounters_doctor", "doctor_id"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
+    booking_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("bookings.id"), nullable=True)
+    patient_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    doctor_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("doctors.id"), nullable=False)
+    facility_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("facilities.id"), nullable=True)
+    encounter_type: Mapped[str] = mapped_column(String(30), nullable=False, default="office_visit")
+    # office_visit | telehealth | emergency | procedure | walk_in
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="open")
+    # open | completed | cancelled
+    chief_complaint: Mapped[str | None] = mapped_column(Text, nullable=True)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    encounter_date: Mapped[date] = mapped_column(Date, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+
+    booking: Mapped["Booking | None"] = relationship("Booking")
+    patient: Mapped["User"] = relationship("User", foreign_keys=[patient_id])
+    doctor: Mapped["Doctor"] = relationship("Doctor")
+    facility: Mapped["Facility | None"] = relationship("Facility")
+    vitals: Mapped[list["Vital"]] = relationship("Vital", back_populates="encounter", cascade="all, delete-orphan")
+    diagnoses: Mapped[list["Diagnosis"]] = relationship("Diagnosis", back_populates="encounter", cascade="all, delete-orphan")
+    prescriptions: Mapped[list["Prescription"]] = relationship("Prescription", back_populates="encounter", cascade="all, delete-orphan")
+
+
+# ─────────────────────────────────────────
+# Vitals
+# ─────────────────────────────────────────
+class Vital(Base):
+    __tablename__ = "vitals"
+    __table_args__ = (
+        Index("ix_vitals_encounter", "encounter_id"),
+        Index("ix_vitals_patient", "patient_id"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
+    encounter_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("encounters.id"), nullable=False)
+    patient_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    bp_systolic: Mapped[int | None] = mapped_column(Integer, nullable=True)     # mmHg
+    bp_diastolic: Mapped[int | None] = mapped_column(Integer, nullable=True)    # mmHg
+    heart_rate: Mapped[int | None] = mapped_column(Integer, nullable=True)      # bpm
+    temperature_f: Mapped[float | None] = mapped_column(Numeric(5, 2), nullable=True)  # °F
+    weight_kg: Mapped[float | None] = mapped_column(Numeric(6, 2), nullable=True)
+    height_cm: Mapped[float | None] = mapped_column(Numeric(5, 1), nullable=True)
+    spo2: Mapped[float | None] = mapped_column(Numeric(5, 2), nullable=True)    # %
+    respiratory_rate: Mapped[int | None] = mapped_column(Integer, nullable=True)  # breaths/min
+    recorded_by: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    recorded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+
+    encounter: Mapped["Encounter"] = relationship("Encounter", back_populates="vitals")
+    patient: Mapped["User"] = relationship("User", foreign_keys=[patient_id])
+    recorder: Mapped["User"] = relationship("User", foreign_keys=[recorded_by])
+
+
+# ─────────────────────────────────────────
+# Diagnoses
+# ─────────────────────────────────────────
+class Diagnosis(Base):
+    __tablename__ = "diagnoses"
+    __table_args__ = (
+        Index("ix_diagnoses_encounter", "encounter_id"),
+        Index("ix_diagnoses_patient", "patient_id"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
+    encounter_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("encounters.id"), nullable=False)
+    patient_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    icd10_code: Mapped[str] = mapped_column(String(20), nullable=False)
+    description: Mapped[str] = mapped_column(Text, nullable=False)
+    diagnosis_type: Mapped[str] = mapped_column(String(20), nullable=False, default="primary")
+    # primary | secondary | differential
+    onset_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    resolved: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    created_by: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+
+    encounter: Mapped["Encounter"] = relationship("Encounter", back_populates="diagnoses")
+    patient: Mapped["User"] = relationship("User", foreign_keys=[patient_id])
+    creator: Mapped["User"] = relationship("User", foreign_keys=[created_by])
+
+
+# ─────────────────────────────────────────
+# Prescriptions
+# ─────────────────────────────────────────
+class Prescription(Base):
+    __tablename__ = "prescriptions"
+    __table_args__ = (
+        Index("ix_prescriptions_encounter", "encounter_id"),
+        Index("ix_prescriptions_patient", "patient_id"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
+    encounter_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("encounters.id"), nullable=False)
+    patient_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    drug_name: Mapped[str] = mapped_column(Text, nullable=False)
+    dose: Mapped[str] = mapped_column(String(50), nullable=False)
+    frequency: Mapped[str] = mapped_column(String(50), nullable=False)
+    route: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    # oral | IV | IM | topical | inhaled | sublingual | other
+    start_date: Mapped[date] = mapped_column(Date, nullable=False)
+    end_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    refills: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    prescriber_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="active")
+    # active | completed | cancelled | on_hold
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+
+    encounter: Mapped["Encounter"] = relationship("Encounter", back_populates="prescriptions")
+    patient: Mapped["User"] = relationship("User", foreign_keys=[patient_id])
+    prescriber: Mapped["User"] = relationship("User", foreign_keys=[prescriber_id])
+
+
+# ─────────────────────────────────────────
+# Allergies  (patient-scoped, not per encounter)
+# ─────────────────────────────────────────
+class Allergy(Base):
+    __tablename__ = "allergies"
+    __table_args__ = (
+        Index("ix_allergies_patient", "patient_id"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
+    patient_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    allergen: Mapped[str] = mapped_column(Text, nullable=False)
+    reaction: Mapped[str | None] = mapped_column(Text, nullable=True)
+    severity: Mapped[str] = mapped_column(String(20), nullable=False, default="unknown")
+    # mild | moderate | severe | life_threatening | unknown
+    onset_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="active")
+    # active | inactive
+    recorded_by: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+
+    patient: Mapped["User"] = relationship("User", foreign_keys=[patient_id])
+    recorder: Mapped["User"] = relationship("User", foreign_keys=[recorded_by])
+
+
+# ─────────────────────────────────────────
+# Problem List  (chronic conditions, patient-scoped)
+# ─────────────────────────────────────────
+class ProblemList(Base):
+    __tablename__ = "problem_list"
+    __table_args__ = (
+        Index("ix_problem_list_patient", "patient_id"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
+    patient_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    icd10_code: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    description: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="active")
+    # active | inactive | resolved
+    onset_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    resolved_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    noted_by: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+
+    patient: Mapped["User"] = relationship("User", foreign_keys=[patient_id])
+    noter: Mapped["User"] = relationship("User", foreign_keys=[noted_by])

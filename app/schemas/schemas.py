@@ -375,3 +375,182 @@ class NotificationOut(BaseModel):
     created_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+# ── Clinical — Encounters ─────────────────────────────────────────────────────
+
+class EncounterCreate(BaseModel):
+    booking_id: uuid.UUID | None = None
+    patient_id: uuid.UUID
+    doctor_id: uuid.UUID
+    facility_id: uuid.UUID | None = None
+    encounter_type: str = "office_visit"
+    chief_complaint: str | None = None
+    notes: str | None = None
+    encounter_date: date
+
+
+class EncounterOut(BaseModel):
+    id: uuid.UUID
+    booking_id: uuid.UUID | None
+    patient_id: uuid.UUID
+    doctor_id: uuid.UUID
+    facility_id: uuid.UUID | None
+    encounter_type: str
+    status: str
+    chief_complaint: str | None
+    notes: str | None
+    encounter_date: date
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+# ── Clinical — Vitals ─────────────────────────────────────────────────────────
+
+class VitalCreate(BaseModel):
+    bp_systolic: int | None = None
+    bp_diastolic: int | None = None
+    heart_rate: int | None = None
+    temperature_f: float | None = None
+    weight_kg: float | None = None
+    height_cm: float | None = None
+    spo2: float | None = None
+    respiratory_rate: int | None = None
+
+
+class VitalOut(BaseModel):
+    id: uuid.UUID
+    encounter_id: uuid.UUID
+    patient_id: uuid.UUID
+    bp_systolic: int | None
+    bp_diastolic: int | None
+    heart_rate: int | None
+    temperature_f: float | None
+    weight_kg: float | None
+    height_cm: float | None
+    spo2: float | None
+    respiratory_rate: int | None
+    recorded_by: uuid.UUID
+    recorded_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+# ── Clinical — Diagnoses ──────────────────────────────────────────────────────
+
+class DiagnosisCreate(BaseModel):
+    icd10_code: str
+    description: str
+    diagnosis_type: str = "primary"
+    onset_date: date | None = None
+
+
+class DiagnosisOut(BaseModel):
+    id: uuid.UUID
+    encounter_id: uuid.UUID
+    patient_id: uuid.UUID
+    icd10_code: str
+    description: str
+    diagnosis_type: str
+    onset_date: date | None
+    resolved: bool
+    created_by: uuid.UUID
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+# ── Clinical — Prescriptions ──────────────────────────────────────────────────
+
+class PrescriptionCreate(BaseModel):
+    drug_name: str
+    dose: str
+    frequency: str
+    route: str | None = None
+    start_date: date
+    end_date: date | None = None
+    refills: int = 0
+    notes: str | None = None
+
+
+class PrescriptionOut(BaseModel):
+    id: uuid.UUID
+    encounter_id: uuid.UUID
+    patient_id: uuid.UUID
+    drug_name: str
+    dose: str
+    frequency: str
+    route: str | None
+    start_date: date
+    end_date: date | None
+    refills: int
+    notes: str | None
+    prescriber_id: uuid.UUID
+    status: str
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+# ── Clinical — Allergies ──────────────────────────────────────────────────────
+
+class AllergyCreate(BaseModel):
+    allergen: str
+    reaction: str | None = None
+    severity: str = "unknown"
+    onset_date: date | None = None
+
+
+class AllergyOut(BaseModel):
+    id: uuid.UUID
+    patient_id: uuid.UUID
+    allergen: str
+    reaction: str | None
+    severity: str
+    onset_date: date | None
+    status: str
+    recorded_by: uuid.UUID
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+# ── Clinical — Problem List ───────────────────────────────────────────────────
+
+class ProblemCreate(BaseModel):
+    icd10_code: str | None = None
+    description: str
+    status: str = "active"
+    onset_date: date | None = None
+
+
+class ProblemOut(BaseModel):
+    id: uuid.UUID
+    patient_id: uuid.UUID
+    icd10_code: str | None
+    description: str
+    status: str
+    onset_date: date | None
+    resolved_date: date | None
+    noted_by: uuid.UUID
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+# ── Clinical — Chart (composite read) ────────────────────────────────────────
+
+class EncounterWithDetails(EncounterOut):
+    vitals: list[VitalOut] = []
+    diagnoses: list[DiagnosisOut] = []
+    prescriptions: list[PrescriptionOut] = []
+
+
+class PatientChartOut(BaseModel):
+    patient_id: uuid.UUID
+    allergies: list[AllergyOut] = []
+    problem_list: list[ProblemOut] = []
+    encounters: list[EncounterWithDetails] = []
