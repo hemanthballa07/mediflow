@@ -66,6 +66,42 @@ services:
       migrator:
         condition: service_completed_successfully
 
+  mailhog:
+    image: axllent/mailpit:latest
+    ports:
+      - "1025:1025"   # SMTP
+      - "8025:8025"   # Web UI (mailpit UI)
+    healthcheck:
+      test: ["CMD", "nc", "-z", "localhost", "1025"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: python -m worker.main
+    environment:
+      DATABASE_URL: postgresql+asyncpg://mediflow:mediflow@postgres:5432/mediflow
+      REDIS_URL: redis://redis:6379/0
+      JWT_SECRET: dev-secret-change-in-prod-please
+      ADMIN_API_KEY: changeme-replace-in-prod-xxxxxxxxxx
+      SMTP_HOST: mailhog
+      SMTP_PORT: 1025
+      SMTP_FROM: noreply@mediflow.dev
+      ENVIRONMENT: development
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrator:
+        condition: service_completed_successfully
+      mailhog:
+        condition: service_healthy
+    restart: unless-stopped
+
   prometheus:
     image: prom/prometheus:latest
     ports:
