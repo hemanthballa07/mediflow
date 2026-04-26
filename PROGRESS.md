@@ -72,8 +72,8 @@ Living source of truth. Reflects current project state at all times.
 - ✅ Role-scoped endpoints (patient/doctor/admin)
 
 ### Tests
-- ✅ 27 unit tests (pytest)
-- ✅ 10 integration tests (live Docker stack)
+- ✅ 38 unit tests (pytest) — includes 11 Phase 3 clinical tests
+- ✅ 13 integration tests (live Docker stack) — includes Phase 3 full workflow
 - ✅ k6 load tests: benchmark.js, contention_test.js
 - ✅ Contention test proven: 50 VUs, 1 booking through, 13,437 conflicts, 0 server errors
 
@@ -105,9 +105,16 @@ Living source of truth. Reflects current project state at all times.
 - ✅ Endpoints: `GET/PUT /api/v1/preferences/me`
 
 ### Phase 3 — Clinical Data (Encounters)
-- ⏳ `encounters`, `vitals`, `diagnoses`, `prescriptions`, `allergies`, `problem_list`
-- ⏳ Doctor chart view with access control
-- ⏳ All PHI reads → audit log
+- ✅ `encounters` table — ties booking to clinical visit; types: office_visit | telehealth | emergency | procedure | walk_in
+- ✅ `vitals` table — BP, HR, temperature (°F), weight, height, SpO2, RR per encounter
+- ✅ `diagnoses` table — ICD-10 code, primary/secondary/differential flag, onset date, resolved flag
+- ✅ `prescriptions` table — drug, dose, frequency, route, start/end dates, refills, prescriber, status
+- ✅ `allergies` table — allergen, reaction, severity (mild/moderate/severe/life_threatening/unknown), patient-scoped
+- ✅ `problem_list` table — active/inactive/resolved chronic conditions per patient (ICD-10 optional)
+- ✅ Migration 005_clinical_encounters.py — all 6 tables + indexes
+- ✅ `app/services/clinical.py` — CRUD + chart + access control
+- ✅ `GET /api/v1/patients/{id}/chart` — doctor/admin only; patients get 403; doctor sees own patients only (masked as 404); all PHI reads write to audit_log
+- ✅ Write endpoints: `POST /encounters`, `/encounters/{id}/vitals`, `/encounters/{id}/diagnoses`, `/encounters/{id}/prescriptions`, `/patients/{id}/allergies`, `/patients/{id}/problems` — doctor/admin only
 
 ### Phase 4 — Referrals + Orders
 - ⏳ `referrals` (cross-department patient routing)
@@ -153,4 +160,4 @@ make clean           # stop + remove volumes
 ```
 
 ## Next Migration
-Next file: `migrations/versions/005_clinical_encounters.py`
+Next file: `migrations/versions/006_referrals_orders.py`

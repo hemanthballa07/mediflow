@@ -696,3 +696,336 @@ def test_db_query_duration_histogram_is_registered():
 
     assert isinstance(db_query_duration_seconds, Histogram)
     assert callable(db_query_duration_seconds.observe)
+
+
+# ── Phase 3: Clinical — access control ───────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_chart_patient_role_gets_403():
+    """Patients cannot access any chart — always 403."""
+    from fastapi import HTTPException
+    from app.services.clinical import ClinicalService
+
+    patient_user = MagicMock()
+    patient_user.role = "patient"
+    patient_user.id = uuid.uuid4()
+
+    mock_db = AsyncMock()
+
+    with pytest.raises(HTTPException) as exc_info:
+        await ClinicalService._assert_chart_access(
+            requester=patient_user,
+            patient_id=uuid.uuid4(),
+            db=mock_db,
+        )
+
+    assert exc_info.value.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_chart_doctor_no_booking_relationship_gets_404():
+    """Doctor with no booking to patient sees 404 (security masking)."""
+    from fastapi import HTTPException
+    from app.services.clinical import ClinicalService
+
+    doctor_user = MagicMock()
+    doctor_user.role = "doctor"
+    doctor_user.id = uuid.uuid4()
+
+    mock_doctor = MagicMock()
+    mock_doctor.id = uuid.uuid4()
+
+    mock_doctor_result = MagicMock()
+    mock_doctor_result.scalar_one_or_none.return_value = mock_doctor
+
+    mock_booking_result = MagicMock()
+    mock_booking_result.scalar_one_or_none.return_value = None  # no link
+
+    mock_db = AsyncMock()
+    mock_db.execute = AsyncMock(side_effect=[mock_doctor_result, mock_booking_result])
+
+    with pytest.raises(HTTPException) as exc_info:
+        await ClinicalService._assert_chart_access(
+            requester=doctor_user,
+            patient_id=uuid.uuid4(),
+            db=mock_db,
+        )
+
+    assert exc_info.value.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_chart_admin_role_passes_access_check():
+    """Admin role always passes access check with no DB queries."""
+    from app.services.clinical import ClinicalService
+
+    admin_user = MagicMock()
+    admin_user.role = "admin"
+    admin_user.id = uuid.uuid4()
+
+    mock_db = AsyncMock()
+    mock_db.execute = AsyncMock()
+
+    await ClinicalService._assert_chart_access(
+        requester=admin_user,
+        patient_id=uuid.uuid4(),
+        db=mock_db,
+    )
+
+    mock_db.execute.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_chart_doctor_with_booking_passes_access_check():
+    """Doctor who has booked with patient passes access check."""
+    from app.services.clinical import ClinicalService
+
+    doctor_user = MagicMock()
+    doctor_user.role = "doctor"
+    doctor_user.id = uuid.uuid4()
+
+    mock_doctor = MagicMock()
+    mock_doctor.id = uuid.uuid4()
+
+    mock_doctor_result = MagicMock()
+    mock_doctor_result.scalar_one_or_none.return_value = mock_doctor
+
+    mock_booking = MagicMock()
+    mock_booking_result = MagicMock()
+    mock_booking_result.scalar_one_or_none.return_value = mock_booking
+
+    mock_db = AsyncMock()
+    mock_db.execute = AsyncMock(side_effect=[mock_doctor_result, mock_booking_result])
+
+    await ClinicalService._assert_chart_access(
+        requester=doctor_user,
+        patient_id=uuid.uuid4(),
+        db=mock_db,
+    )
+
+
+# ── Phase 3: Clinical — encounter CRUD ───────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_create_encounter_returns_encounter():
+    """create_encounter inserts and returns the encounter ORM object."""
+    from datetime import date as date_type
+    from app.services.clinical import ClinicalService
+    from app.schemas.schemas import EncounterCreate
+
+    payload = EncounterCreate(
+        patient_id=uuid.uuid4(),
+        doctor_id=uuid.uuid4(),
+        encounter_type="office_visit",
+        encounter_date=date_type.today(),
+    )
+
+    mock_enc = MagicMock()
+    mock_enc.id = uuid.uuid4()
+
+    mock_db = AsyncMock()
+    mock_db.add = MagicMock()
+    mock_db.flush = AsyncMock()
+    mock_db.refresh = AsyncMock(side_effect=lambda obj: None)
+
+    with patch("app.services.clinical.Encounter", return_value=mock_enc):
+        result = await ClinicalService.create_encounter(payload, mock_db)
+
+    mock_db.add.assert_called_once_with(mock_enc)
+    await mock_db.flush()
+    assert result is mock_enc
+
+
+@pytest.mark.asyncio
+async def test_add_vitals_attaches_to_encounter():
+    """add_vitals resolves the encounter and creates a Vital row."""
+    from app.services.clinical import ClinicalService
+    from app.schemas.schemas import VitalCreate
+
+    encounter_id = uuid.uuid4()
+    patient_id = uuid.uuid4()
+
+    mock_enc = MagicMock()
+    mock_enc.id = encounter_id
+    mock_enc.patient_id = patient_id
+
+    mock_enc_result = MagicMock()
+    mock_enc_result.scalar_one_or_none.return_value = mock_enc
+
+    mock_vital = MagicMock()
+
+    mock_db = AsyncMock()
+    mock_db.execute = AsyncMock(return_value=mock_enc_result)
+    mock_db.add = MagicMock()
+    mock_db.flush = AsyncMock()
+    mock_db.refresh = AsyncMock(side_effect=lambda obj: None)
+
+    recorder = MagicMock()
+    recorder.id = uuid.uuid4()
+
+    payload = VitalCreate(heart_rate=72, bp_systolic=120, bp_diastolic=80, spo2=98.5)
+
+    with patch("app.services.clinical.Vital", return_value=mock_vital):
+        result = await ClinicalService.add_vitals(encounter_id, payload, recorder, mock_db)
+
+    mock_db.add.assert_called_once_with(mock_vital)
+    assert result is mock_vital
+
+
+@pytest.mark.asyncio
+async def test_add_vitals_unknown_encounter_raises_404():
+    """add_vitals raises 404 when encounter does not exist."""
+    from fastapi import HTTPException
+    from app.services.clinical import ClinicalService
+    from app.schemas.schemas import VitalCreate
+
+    mock_result = MagicMock()
+    mock_result.scalar_one_or_none.return_value = None
+
+    mock_db = AsyncMock()
+    mock_db.execute = AsyncMock(return_value=mock_result)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await ClinicalService.add_vitals(
+            uuid.uuid4(),
+            VitalCreate(),
+            MagicMock(),
+            mock_db,
+        )
+
+    assert exc_info.value.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_add_diagnosis_uses_icd10_code():
+    """add_diagnosis stores the ICD-10 code on the Diagnosis row."""
+    from app.services.clinical import ClinicalService
+    from app.schemas.schemas import DiagnosisCreate
+    from datetime import date as date_type
+
+    encounter_id = uuid.uuid4()
+    mock_enc = MagicMock()
+    mock_enc.id = encounter_id
+    mock_enc.patient_id = uuid.uuid4()
+
+    mock_enc_result = MagicMock()
+    mock_enc_result.scalar_one_or_none.return_value = mock_enc
+
+    created_dx = None
+
+    def capture_dx(obj):
+        nonlocal created_dx
+        created_dx = obj
+
+    mock_db = AsyncMock()
+    mock_db.execute = AsyncMock(return_value=mock_enc_result)
+    mock_db.add = MagicMock(side_effect=capture_dx)
+    mock_db.flush = AsyncMock()
+    mock_db.refresh = AsyncMock(side_effect=lambda obj: None)
+
+    creator = MagicMock()
+    creator.id = uuid.uuid4()
+
+    payload = DiagnosisCreate(
+        icd10_code="E11.9",
+        description="Type 2 diabetes mellitus without complications",
+        diagnosis_type="primary",
+        onset_date=date_type(2024, 1, 15),
+    )
+
+    from app.models.models import Diagnosis
+    with patch("app.services.clinical.Diagnosis", wraps=Diagnosis) as mock_dx_cls:
+        await ClinicalService.add_diagnosis(encounter_id, payload, creator, mock_db)
+        call_kwargs = mock_dx_cls.call_args.kwargs
+        assert call_kwargs["icd10_code"] == "E11.9"
+        assert call_kwargs["diagnosis_type"] == "primary"
+
+
+@pytest.mark.asyncio
+async def test_add_prescription_sets_prescriber():
+    """add_prescription sets prescriber_id from the caller's user."""
+    from app.services.clinical import ClinicalService
+    from app.schemas.schemas import PrescriptionCreate
+    from datetime import date as date_type
+    from app.models.models import Prescription
+
+    encounter_id = uuid.uuid4()
+    mock_enc = MagicMock()
+    mock_enc.id = encounter_id
+    mock_enc.patient_id = uuid.uuid4()
+
+    mock_enc_result = MagicMock()
+    mock_enc_result.scalar_one_or_none.return_value = mock_enc
+
+    mock_db = AsyncMock()
+    mock_db.execute = AsyncMock(return_value=mock_enc_result)
+    mock_db.add = MagicMock()
+    mock_db.flush = AsyncMock()
+    mock_db.refresh = AsyncMock(side_effect=lambda obj: None)
+
+    prescriber = MagicMock()
+    prescriber.id = uuid.uuid4()
+
+    payload = PrescriptionCreate(
+        drug_name="Metformin",
+        dose="500mg",
+        frequency="twice daily",
+        start_date=date_type.today(),
+    )
+
+    with patch("app.services.clinical.Prescription", wraps=Prescription) as mock_rx_cls:
+        await ClinicalService.add_prescription(encounter_id, payload, prescriber, mock_db)
+        call_kwargs = mock_rx_cls.call_args.kwargs
+        assert call_kwargs["prescriber_id"] == prescriber.id
+        assert call_kwargs["drug_name"] == "Metformin"
+
+
+@pytest.mark.asyncio
+async def test_add_allergy_records_severity():
+    """add_allergy stores allergen and severity correctly."""
+    from app.services.clinical import ClinicalService
+    from app.schemas.schemas import AllergyCreate
+    from app.models.models import Allergy
+
+    mock_db = AsyncMock()
+    mock_db.add = MagicMock()
+    mock_db.flush = AsyncMock()
+    mock_db.refresh = AsyncMock(side_effect=lambda obj: None)
+
+    recorder = MagicMock()
+    recorder.id = uuid.uuid4()
+
+    payload = AllergyCreate(allergen="Penicillin", reaction="Anaphylaxis", severity="severe")
+
+    with patch("app.services.clinical.Allergy", wraps=Allergy) as mock_allergy_cls:
+        await ClinicalService.add_allergy(uuid.uuid4(), payload, recorder, mock_db)
+        call_kwargs = mock_allergy_cls.call_args.kwargs
+        assert call_kwargs["allergen"] == "Penicillin"
+        assert call_kwargs["severity"] == "severe"
+
+
+@pytest.mark.asyncio
+async def test_add_problem_defaults_to_active_status():
+    """add_problem defaults status to active when not specified."""
+    from app.services.clinical import ClinicalService
+    from app.schemas.schemas import ProblemCreate
+    from app.models.models import ProblemList
+
+    mock_db = AsyncMock()
+    mock_db.add = MagicMock()
+    mock_db.flush = AsyncMock()
+    mock_db.refresh = AsyncMock(side_effect=lambda obj: None)
+
+    noter = MagicMock()
+    noter.id = uuid.uuid4()
+
+    payload = ProblemCreate(
+        icd10_code="I10",
+        description="Essential hypertension",
+    )
+
+    with patch("app.services.clinical.ProblemList", wraps=ProblemList) as mock_pl_cls:
+        await ClinicalService.add_problem(uuid.uuid4(), payload, noter, mock_db)
+        call_kwargs = mock_pl_cls.call_args.kwargs
+        assert call_kwargs["status"] == "active"
+        assert call_kwargs["icd10_code"] == "I10"
