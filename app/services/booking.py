@@ -8,6 +8,8 @@ from fastapi import HTTPException, status
 import redis.asyncio as aioredis
 
 from app.models.models import Slot, Booking, IdempotencyKey, User, Room
+from app.services.notification import NotificationService
+from app.services.waitlist import WaitlistService
 from app.schemas.schemas import BookingOut
 from app.core.metrics import (
     bookings_created_total, booking_conflicts_total,
@@ -170,7 +172,34 @@ class BookingService:
 
         bookings_created_total.inc()
 
-        # ── 6. Invalidate slot availability cache ─────────────────────────────
+        # ── 6. Queue booking confirmation ─────────────────────────────────────
+        user_res = await db.execute(select(User).where(User.id == user_id))
+        actor: User | None = user_res.scalar_one_or_none()
+        if actor:
+            slot_res2 = await db.execute(select(Slot).where(Slot.id == slot_id))
+            _slot_for_notif: Slot | None = slot_res2.scalar_one_or_none()
+            slot_info = (
+                f"on {_slot_for_notif.date} at {_slot_for_notif.start_time}"
+                if _slot_for_notif else ""
+            )
+            await NotificationService.enqueue(
+                db=db,
+                user_id=user_id,
+                channel="email",
+                notif_type="BOOKING_CONFIRMED",
+                recipient=actor.email,
+                subject="Booking confirmed — MediFlow",
+                body=(
+                    f"Dear {actor.name},\n\n"
+                    f"Your appointment {slot_info} has been confirmed.\n\n"
+                    f"Booking ID: {booking.id}\n\n"
+                    "MediFlow"
+                ),
+                context={"booking_id": str(booking.id)},
+            )
+            await db.commit()
+
+        # ── 7. Invalidate slot availability cache ─────────────────────────────
         slot_res = await db.execute(select(Slot).where(Slot.id == slot_id))
         slot: Slot | None = slot_res.scalar_one_or_none()
         if slot:
@@ -246,6 +275,14 @@ class BookingService:
                     detail=f"Cannot cancel within {settings.CANCELLATION_WINDOW_HOURS}h of appointment",
                 )
 
+        # Capture values before any commit (expires attributes)
+        slot_doctor_id = slot.doctor_id if slot else None
+        slot_date = slot.date if slot else None
+        slot_date_str = str(slot.date) if slot else ""
+        slot_time_str = str(slot.start_time) if slot else ""
+        slot_dept_id = slot.department_id if slot else None
+        appt_type_id = booking.appointment_type_id
+
         booking.status = "cancelled"
 
         # Free the slot back up
@@ -259,11 +296,42 @@ class BookingService:
             user_id=user_id,
             target=str(booking_id),
         )
+
+        # Queue cancellation notification
+        user_res = await db.execute(select(User).where(User.id == user_id))
+        actor: User | None = user_res.scalar_one_or_none()
+        if actor:
+            slot_info = f"on {slot_date_str} at {slot_time_str}" if slot else ""
+            await NotificationService.enqueue(
+                db=db,
+                user_id=user_id,
+                channel="email",
+                notif_type="BOOKING_CANCELLED",
+                recipient=actor.email,
+                subject="Booking cancelled — MediFlow",
+                body=(
+                    f"Dear {actor.name},\n\n"
+                    f"Your appointment {slot_info} has been cancelled.\n\n"
+                    f"Booking ID: {booking_id}\n\n"
+                    "MediFlow"
+                ),
+                context={"booking_id": str(booking_id)},
+            )
+
         await db.commit()
         booking_cancelled_total.inc()
 
-        if slot:
-            await redis.delete(f"slots:{slot.doctor_id}:{slot.date}")
+        if slot_doctor_id and slot_date:
+            await redis.delete(f"slots:{slot_doctor_id}:{slot_date}")
+
+        if slot_dept_id:
+            # Promote next waiting patient for this department/type
+            await WaitlistService.promote_next(
+                department_id=slot_dept_id,
+                appointment_type_id=appt_type_id,
+                db=db,
+            )
+            await db.commit()
 
         return BookingOut.model_validate(booking)
 
