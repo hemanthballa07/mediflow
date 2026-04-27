@@ -2,7 +2,7 @@ import uuid
 from fastapi import APIRouter, Depends, Header, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.session import get_db
+from app.db.session import get_db, get_read_db
 from app.api.v1.deps import require_role, get_current_user, phi_audit
 from app.models.models import User
 from app.services.claims import ClaimsService
@@ -42,10 +42,9 @@ async def submit_claim(
 async def get_claim(
     claim_id: uuid.UUID,
     current_user: User = Depends(_any_auth),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_read_db),
 ):
     claim = await ClaimsService.get(claim_id, current_user, db)
-    await db.commit()
     return claim
 
 
@@ -53,10 +52,9 @@ async def get_claim(
 async def list_patient_claims(
     patient_id: uuid.UUID,
     current_user: User = Depends(_any_auth),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_read_db),
 ):
     claims = await ClaimsService.list_for_patient(patient_id, current_user, db)
-    await db.commit()
     return claims
 
 

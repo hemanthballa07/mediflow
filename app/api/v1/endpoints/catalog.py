@@ -2,7 +2,7 @@ import uuid
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.session import get_db
+from app.db.session import get_read_db as get_db
 from app.schemas.schemas import DoctorOut, FacilityOut, DepartmentOut, SpecialtyOut
 from app.services.catalog_service import CatalogService
 

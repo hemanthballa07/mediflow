@@ -6,6 +6,7 @@ from functools import lru_cache
 class Settings(BaseSettings):
     DATABASE_URL: str
     REDIS_URL: str = "redis://localhost:6379/0"
+    READ_REPLICA_URL: str | None = None
 
     JWT_SECRET: str
     JWT_ALGORITHM: str = "HS256"
@@ -29,6 +30,8 @@ class Settings(BaseSettings):
     WAITLIST_NOTIFICATION_EXPIRY_HOURS: int = 48
 
     ENCRYPTION_KEY: str = "bWVkaWZsb3ctZGV2LWtleS0zMi1ieXRlcy1wYWRkZWQ="
+
+    OTEL_EXPORTER_OTLP_ENDPOINT: str = "http://tempo:4317"
 
     @model_validator(mode="after")
     def validate_secrets(self) -> "Settings":

@@ -20,10 +20,30 @@
       "id": 3, "type": "timeseries", "title": "p50 / p95 / p99 Latency (ms)",
       "gridPos": {"h":7,"w":12,"x":12,"y":1},
       "targets": [
-        {"expr": "histogram_quantile(0.50, sum(rate(mediflow_http_request_duration_seconds_bucket[1m])) by (le)) * 1000", "legendFormat": "p50"},
-        {"expr": "histogram_quantile(0.95, sum(rate(mediflow_http_request_duration_seconds_bucket[1m])) by (le)) * 1000", "legendFormat": "p95"},
-        {"expr": "histogram_quantile(0.99, sum(rate(mediflow_http_request_duration_seconds_bucket[1m])) by (le)) * 1000", "legendFormat": "p99"}
-      ]
+        {
+          "expr": "histogram_quantile(0.50, sum(rate(mediflow_http_request_duration_seconds_bucket[1m])) by (le)) * 1000",
+          "legendFormat": "p50",
+          "exemplar": true
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(mediflow_http_request_duration_seconds_bucket[1m])) by (le)) * 1000",
+          "legendFormat": "p95",
+          "exemplar": true
+        },
+        {
+          "expr": "histogram_quantile(0.99, sum(rate(mediflow_http_request_duration_seconds_bucket[1m])) by (le)) * 1000",
+          "legendFormat": "p99",
+          "exemplar": true
+        }
+      ],
+      "options": {
+        "dataLinks": [
+          {
+            "title": "View trace",
+            "url": "${__data.fields[\"traceID\"]}"
+          }
+        ]
+      }
     },
     {
       "id": 4, "type": "row", "title": "Bookings & Conflicts", "gridPos": {"h":1,"w":24,"x":0,"y":8}
@@ -106,6 +126,112 @@
       "targets": [
         {"expr": "sum(rate(mediflow_db_query_duration_seconds_count[1m]))", "legendFormat": "queries/s"}
       ]
+    },
+    {
+      "id": 18, "type": "row", "title": "SLO Burn Rates", "gridPos": {"h":1,"w":24,"x":0,"y":36}
+    },
+    {
+      "id": 19,
+      "type": "timeseries",
+      "title": "P99 Latency SLO Burn Rate (budget: 500ms, alert: 2×/1h)",
+      "description": "Burn rate > 2 means error budget exhausted in ~3 days. SLO: 99% requests < 500ms.",
+      "gridPos": {"h":7,"w":12,"x":0,"y":37},
+      "targets": [{
+        "expr": "(1 - sum(rate(mediflow_http_request_duration_seconds_bucket{le=\"0.5\"}[1h])) / sum(rate(mediflow_http_request_duration_seconds_count[1h]))) / 0.01",
+        "legendFormat": "burn rate (1h)"
+      }],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "green", "value": 0},
+              {"color": "yellow", "value": 1},
+              {"color": "red", "value": 2}
+            ]
+          }
+        }
+      },
+      "options": {
+        "thresholds": {
+          "steps": [{"color": "red", "value": 2}]
+        }
+      }
+    },
+    {
+      "id": 20,
+      "type": "gauge",
+      "title": "P99 Latency Budget Remaining (%)",
+      "description": "% of 1% error budget remaining. Drops to 0 when burn rate sustains at 1×.",
+      "gridPos": {"h":7,"w":12,"x":12,"y":37},
+      "targets": [{
+        "expr": "clamp_min(1 - (1 - sum(rate(mediflow_http_request_duration_seconds_bucket{le=\"0.5\"}[1h])) / sum(rate(mediflow_http_request_duration_seconds_count[1h]))) / 0.01, 0) * 100",
+        "legendFormat": "budget %"
+      }],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "max": 100,
+          "thresholds": {
+            "steps": [
+              {"color": "red", "value": 0},
+              {"color": "yellow", "value": 25},
+              {"color": "green", "value": 50}
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 21,
+      "type": "timeseries",
+      "title": "Error Rate SLO Burn Rate (budget: 1%, alert: 5×/5m)",
+      "description": "Burn rate > 5 means exhausting annual error budget in ~1 day. SLO: < 1% 5xx errors.",
+      "gridPos": {"h":7,"w":12,"x":0,"y":44},
+      "targets": [{
+        "expr": "(sum(rate(mediflow_http_requests_total{status_code=~\"5..\"}[5m])) / sum(rate(mediflow_http_requests_total[5m]))) / 0.01",
+        "legendFormat": "burn rate (5m)"
+      }],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "green", "value": 0},
+              {"color": "yellow", "value": 1},
+              {"color": "red", "value": 5}
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 22,
+      "type": "gauge",
+      "title": "Error Rate SLO Budget Remaining (%)",
+      "description": "% of 1% error budget remaining based on 5m burn rate.",
+      "gridPos": {"h":7,"w":12,"x":12,"y":44},
+      "targets": [{
+        "expr": "clamp_min(1 - (sum(rate(mediflow_http_requests_total{status_code=~\"5..\"}[5m])) / sum(rate(mediflow_http_requests_total[5m]))) / 0.01, 0) * 100",
+        "legendFormat": "budget %"
+      }],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "max": 100,
+          "thresholds": {
+            "steps": [
+              {"color": "red", "value": 0},
+              {"color": "yellow", "value": 25},
+              {"color": "green", "value": 50}
+            ]
+          }
+        }
+      }
     }
   ]
 }

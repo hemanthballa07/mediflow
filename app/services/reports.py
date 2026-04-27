@@ -10,6 +10,7 @@ from app.schemas.schemas import ReportOut, ReportPage, ReportCreate
 from app.core.config import get_settings
 from app.core.metrics import reports_accessed_total, cache_hits_total, cache_misses_total
 from app.core.logging import get_logger
+from app.db.redis import execute_redis
 from app.services.audit import AuditService
 
 log = get_logger(__name__)
@@ -75,7 +76,7 @@ class ReportService:
         cache_key = f"reports:{patient_id}:{report_status or 'ALL'}:first"
 
         if use_cache:
-            cached = await redis.get(cache_key)
+            cached = await execute_redis(redis.get(cache_key))
             if cached:
                 cache_hits_total.labels(cache_key_prefix="reports").inc()
                 raw = json.loads(cached)
@@ -109,7 +110,7 @@ class ReportService:
                 "items": [r.model_dump(mode="json") for r in out_items],
                 "next_cursor": str(next_cursor) if next_cursor else None,
             }
-            await redis.setex(cache_key, settings.REPORT_CACHE_TTL, json.dumps(payload))
+            await execute_redis(redis.setex(cache_key, settings.REPORT_CACHE_TTL, json.dumps(payload)))
 
         reports_accessed_total.labels(status="list").inc()
         return page

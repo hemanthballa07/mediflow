@@ -13,6 +13,7 @@ prometheus-client==0.21.0
 opentelemetry-sdk==1.28.0
 opentelemetry-instrumentation-fastapi==0.49b0
 opentelemetry-instrumentation-sqlalchemy==0.49b0
+opentelemetry-instrumentation-redis==0.49b0
 opentelemetry-exporter-otlp-proto-grpc==1.28.0
 pydantic==2.10.3
 pydantic-settings==2.6.1

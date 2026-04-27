@@ -7,7 +7,7 @@ from app.core.logging import get_logger
 log = get_logger(__name__)
 
 # Endpoints to skip tracking (noisy, low-value)
-_SKIP = {"/health", "/metrics", "/docs", "/openapi.json", "/redoc"}
+_SKIP = {"/health", "/health/live", "/health/ready", "/metrics", "/docs", "/openapi.json", "/redoc"}
 
 
 class MetricsMiddleware(BaseHTTPMiddleware):

@@ -60,6 +60,7 @@ services:
       BOOKING_RATE_LIMIT: "10000/second"
       ENVIRONMENT: development
       ENCRYPTION_KEY: bWVkaWZsb3ctZGV2LWtleS0zMi1ieXRlcy1wYWRkZWQ=
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://tempo:4317
     depends_on:
       postgres:
         condition: service_healthy
@@ -105,6 +106,15 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
+  tempo:
+    image: grafana/tempo:latest
+    ports:
+      - "3200:3200"
+      - "4317:4317"
+    volumes:
+      - ./deploy/tempo/tempo.yaml:/etc/tempo/tempo.yaml:ro
+    command: ["-config.file=/etc/tempo/tempo.yaml"]
+
   prometheus:
     image: prom/prometheus:latest
     ports:
@@ -128,6 +138,7 @@ services:
       - ./deploy/grafana/dashboards:/var/lib/grafana/dashboards:ro
     depends_on:
       - prometheus
+      - tempo
 
 volumes:
   pg_data:
