@@ -74,7 +74,7 @@ Living source of truth. Reflects current project state at all times.
 ### Tests
 - ✅ 69 unit tests (pytest) — includes 11 Phase 3 clinical tests + 10 Phase 4 referrals/orders tests + 11 Phase 5 billing tests + 10 Phase 6 compliance tests
 - ✅ 19 integration tests (live Docker stack) — includes Phase 3 + Phase 4 + Phase 5 flows
-- ✅ **88/88 total passing** (estimated — Phase 6 unit tests added; integration suite unchanged)
+- ✅ **161/161 total passing**
 - ✅ k6 load tests: benchmark.js, contention_test.js
 - ✅ Contention test proven: 50 VUs, 1 booking through, 13,437 conflicts, 0 server errors
 
@@ -157,6 +157,7 @@ Living source of truth. Reflects current project state at all times.
 - ✅ `app/core/encryption.py` — Fernet encrypt/decrypt + HMAC email_hash
 - ✅ 10 new unit tests (Phase 6 compliance + PII encryption)
 
+
 ### Phase 7 — Reliability + Tracing
 - ✅ `/health/live` — always 200 (process probe); `/health/ready` — DB + Redis probe, 503 on failure; old `/health` removed
 - ✅ Redis circuit breaker — `execute_redis(coro)` in `app/db/redis.py`; 5 failures → OPEN; half-open after 30s; structured JSON log on transitions; `ReportService` cache calls wrapped; health probe bypasses CB
@@ -172,6 +173,25 @@ Living source of truth. Reflects current project state at all times.
 - ✅ HL7 v2 ADT ingestion: `POST /hl7/adt` — ADT^A01 (admit/create patient) + ADT^A08 (update demographics), ACK AA/AE responses, admin-key secured
 - ✅ **137/137 tests passing** (48 new Phase 8 tests added)
 
+### Phase 9 — Clinical Decision Support + Real-time
+- ✅ `cds_rules` table — facility_id (nullable=global), rule_type (drug_allergy|drug_drug|vital_alert|sepsis_score), rule_key, severity (info|warning|critical), message, active
+- ✅ Migration `010_cds_rules.py` — creates cds_rules table + seeds 6 rules (penicillin allergy, sulfa allergy, aspirin-warfarin DDI, metformin-contrast DDI, qSOFA, elevated RR)
+- ✅ `app/services/cds.py` — CdsService: evaluate_prescription (drug-allergy check, drug-drug interaction), evaluate_vitals (HR>120, SBP>180, DBP>120, SpO2<92, RR≥22, Temp>103°F), qSOFA score (RR≥22 + SBP≤100 = score≥2 → critical), publish_critical_alerts → Redis pub/sub
+- ✅ Critical drug-allergy → HTTP 409 with cds_alerts in body (blocks prescription write)
+- ✅ Drug-drug + vital alerts → non-blocking, returned in response alongside entity
+- ✅ All CDS alert fires audited to audit_log (CDS_ALERT_FIRED action)
+- ✅ POST /encounters/{id}/vitals now returns `VitalCreatedOut` {vital, cds_alerts[]}
+- ✅ POST /encounters/{id}/prescriptions now returns `PrescriptionCreatedOut` {prescription, cds_alerts[]}
+- ✅ Endpoints: `GET /encounters/{id}/cds-alerts` (doctor/admin; reads from audit_log)
+- ✅ Endpoints: `GET /admin/cds-rules`, `POST /admin/cds-rules`, `PATCH /admin/cds-rules/{id}`
+- ✅ `app/db/redis_pubsub.py` — separate Redis connection for pub/sub (subscriber connections isolated); publish helper with error swallowing
+- ✅ WebSocket: `GET /ws/slots/{doctor_id}/{date}?token=JWT` — sends slot snapshot on connect, forwards Redis pub/sub events `{slot_id, status, timestamp}`
+- ✅ WebSocket: `GET /ws/encounters/{encounter_id}/cds?token=JWT` — sends existing alerts on connect, forwards new critical/warning CDS alerts in real-time
+- ✅ Slot pub/sub wired into booking.py: publishes `{slot_id, status: "booked"}` on create, `{slot_id, status: "available"}` on cancel
+- ✅ CDS critical alerts published to `cds:{encounter_id}` Redis channel
+- ✅ lifespan init/close for pubsub Redis connection
+- ✅ **161/161 tests passing** (24 new Phase 9 tests: 14 CDS unit + 10 WebSocket/pub/sub)
+
 ---
 
 ## Key Commands
@@ -186,4 +206,4 @@ make clean           # stop + remove volumes
 ```
 
 ## Next Migration
-Next file: `migrations/versions/010_*.py`
+Next file: `migrations/versions/011_*.py`

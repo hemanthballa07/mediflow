@@ -818,3 +818,53 @@ class PatientDataExport(BaseModel):
     orders: list[Any] = []
     insurance: list[Any] = []
     claims: list[Any] = []
+
+
+# ── CDS ───────────────────────────────────────────────────────────────────────
+
+class CdsAlertOut(BaseModel):
+    rule_type: str
+    severity: str
+    message: str
+    rule_key: str | None = None
+
+
+class VitalCreatedOut(BaseModel):
+    vital: "VitalOut"
+    cds_alerts: list[CdsAlertOut] = []
+
+    model_config = {"from_attributes": True}
+
+
+class PrescriptionCreatedOut(BaseModel):
+    prescription: "PrescriptionOut"
+    cds_alerts: list[CdsAlertOut] = []
+
+    model_config = {"from_attributes": True}
+
+
+class CdsRuleCreate(BaseModel):
+    facility_id: uuid.UUID | None = None
+    rule_type: Literal["drug_allergy", "drug_drug", "vital_alert", "sepsis_score"]
+    rule_key: str
+    severity: Literal["info", "warning", "critical"]
+    message: str
+
+
+class CdsRulePatch(BaseModel):
+    active: bool | None = None
+    severity: Literal["info", "warning", "critical"] | None = None
+    message: str | None = None
+
+
+class CdsRuleOut(BaseModel):
+    id: uuid.UUID
+    facility_id: uuid.UUID | None
+    rule_type: str
+    rule_key: str
+    severity: str
+    message: str
+    active: bool
+    created_at: datetime
+
+    model_config = {"from_attributes": True}

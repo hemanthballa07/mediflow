@@ -910,3 +910,27 @@ class WebhookDelivery(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
 
     webhook: Mapped["Webhook"] = relationship("Webhook", back_populates="deliveries")
+
+
+# ─────────────────────────────────────────
+# CDS Rules
+# ─────────────────────────────────────────
+class CdsRule(Base):
+    __tablename__ = "cds_rules"
+    __table_args__ = (
+        Index("ix_cds_rules_rule_type_key", "rule_type", "rule_key"),
+        Index("ix_cds_rules_active", "active"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
+    facility_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("facilities.id"), nullable=True)
+    rule_type: Mapped[str] = mapped_column(String(30), nullable=False)
+    # drug_allergy | drug_drug | vital_alert | sepsis_score
+    rule_key: Mapped[str] = mapped_column(Text, nullable=False)
+    # drug_allergy: allergen substring (e.g. "penicillin")
+    # drug_drug: "drug_a|drug_b" pair (case-insensitive)
+    severity: Mapped[str] = mapped_column(String(10), nullable=False)
+    # info | warning | critical
+    message: Mapped[str] = mapped_column(Text, nullable=False)
+    active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))

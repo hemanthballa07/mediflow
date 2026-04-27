@@ -11,6 +11,7 @@ from app.models.models import (
 )
 from app.services.webhooks import WebhookService
 from app.schemas.schemas import (
+    CdsAlertOut,
     EncounterCreate, VitalCreate, DiagnosisCreate, PrescriptionCreate,
     AllergyCreate, ProblemCreate, PatientChartOut,
     EncounterWithDetails, VitalOut, DiagnosisOut, PrescriptionOut,
@@ -94,7 +95,8 @@ class ClinicalService:
         payload: VitalCreate,
         recorder: User,
         db: AsyncSession,
-    ) -> Vital:
+    ) -> tuple[Vital, list[CdsAlertOut]]:
+        from app.services.cds import CdsService
         enc = await ClinicalService._get_encounter_or_404(encounter_id, db)
         v = Vital(
             encounter_id=encounter_id,
@@ -113,7 +115,9 @@ class ClinicalService:
         db.add(v)
         await db.flush()
         await db.refresh(v)
-        return v
+        alerts = await CdsService.evaluate_vitals(encounter_id, enc.patient_id, payload, recorder.id, db)
+        await CdsService.publish_critical_alerts(encounter_id, alerts)
+        return v, alerts
 
     # ── diagnoses ─────────────────────────────────────────────────────────────
 
@@ -147,8 +151,26 @@ class ClinicalService:
         payload: PrescriptionCreate,
         prescriber: User,
         db: AsyncSession,
-    ) -> Prescription:
+    ) -> tuple[Prescription, list[CdsAlertOut]]:
+        from app.services.cds import CdsService
         enc = await ClinicalService._get_encounter_or_404(encounter_id, db)
+
+        alerts = await CdsService.evaluate_prescription(
+            encounter_id, enc.patient_id, payload.drug_name, prescriber.id, db
+        )
+
+        # Block if any critical drug-allergy alert fires
+        critical_allergy = [a for a in alerts if a.rule_type == "drug_allergy" and a.severity == "critical"]
+        if critical_allergy:
+            from fastapi import HTTPException
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "message": "Prescription blocked by drug-allergy CDS rule",
+                    "cds_alerts": [a.model_dump() for a in alerts],
+                },
+            )
+
         p = Prescription(
             encounter_id=encounter_id,
             patient_id=enc.patient_id,
@@ -165,7 +187,7 @@ class ClinicalService:
         db.add(p)
         await db.flush()
         await db.refresh(p)
-        return p
+        return p, alerts
 
     # ── allergies ─────────────────────────────────────────────────────────────
 

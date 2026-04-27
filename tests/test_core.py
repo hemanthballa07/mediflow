@@ -319,7 +319,7 @@ async def test_health_returns_200_when_all_healthy():
     """GET /health returns 200 with ok status when DB and Redis are up."""
     import json
     from fastapi.responses import JSONResponse
-    from app.main import health
+    from app.main import health_ready as health
 
     with patch("app.main.AsyncSessionLocal") as mock_session_cls, \
          patch("app.main.get_redis") as mock_get_redis:
@@ -349,7 +349,7 @@ async def test_health_returns_503_when_db_fails():
     """GET /health returns 503 with db=error when DB is unreachable."""
     import json
     from fastapi.responses import JSONResponse
-    from app.main import health
+    from app.main import health_ready as health
 
     with patch("app.main.AsyncSessionLocal") as mock_session_cls, \
          patch("app.main.get_redis") as mock_get_redis:
@@ -379,7 +379,7 @@ async def test_health_returns_503_when_redis_fails():
     """GET /health returns 503 with redis=error when Redis is unreachable."""
     import json
     from fastapi.responses import JSONResponse
-    from app.main import health
+    from app.main import health_ready as health
 
     with patch("app.main.AsyncSessionLocal") as mock_session_cls, \
          patch("app.main.get_redis") as mock_get_redis:
@@ -865,11 +865,14 @@ async def test_add_vitals_attaches_to_encounter():
 
     payload = VitalCreate(heart_rate=72, bp_systolic=120, bp_diastolic=80, spo2=98.5)
 
-    with patch("app.services.clinical.Vital", return_value=mock_vital):
-        result = await ClinicalService.add_vitals(encounter_id, payload, recorder, mock_db)
+    with patch("app.services.clinical.Vital", return_value=mock_vital), \
+         patch("app.services.cds.CdsService.evaluate_vitals", AsyncMock(return_value=[])), \
+         patch("app.services.cds.CdsService.publish_critical_alerts", AsyncMock()):
+        result, alerts = await ClinicalService.add_vitals(encounter_id, payload, recorder, mock_db)
 
     mock_db.add.assert_called_once_with(mock_vital)
     assert result is mock_vital
+    assert alerts == []
 
 
 @pytest.mark.asyncio

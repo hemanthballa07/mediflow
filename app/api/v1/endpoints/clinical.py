@@ -2,15 +2,15 @@ import uuid
 from fastapi import APIRouter, Depends, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.session import get_db
+from app.db.session import get_db, get_read_db
 from app.api.v1.deps import require_role, get_current_user, phi_audit
 from app.models.models import User
 from app.services.clinical import ClinicalService
 from app.schemas.schemas import (
     EncounterCreate, EncounterOut,
-    VitalCreate, VitalOut,
+    VitalCreate, VitalOut, VitalCreatedOut,
     DiagnosisCreate, DiagnosisOut,
-    PrescriptionCreate, PrescriptionOut,
+    PrescriptionCreate, PrescriptionOut, PrescriptionCreatedOut,
     AllergyCreate, AllergyOut,
     ProblemCreate, ProblemOut,
     PatientChartOut,
@@ -34,7 +34,7 @@ async def create_encounter(
 
 @router.post(
     "/encounters/{encounter_id}/vitals",
-    response_model=VitalOut,
+    response_model=VitalCreatedOut,
     status_code=status.HTTP_201_CREATED,
 )
 async def add_vitals(
@@ -43,9 +43,9 @@ async def add_vitals(
     current_user: User = Depends(_doctor_or_admin),
     db: AsyncSession = Depends(get_db),
 ):
-    vital = await ClinicalService.add_vitals(encounter_id, payload, current_user, db)
+    vital, cds_alerts = await ClinicalService.add_vitals(encounter_id, payload, current_user, db)
     await db.commit()
-    return vital
+    return VitalCreatedOut(vital=VitalOut.model_validate(vital), cds_alerts=cds_alerts)
 
 
 @router.post(
@@ -66,7 +66,7 @@ async def add_diagnosis(
 
 @router.post(
     "/encounters/{encounter_id}/prescriptions",
-    response_model=PrescriptionOut,
+    response_model=PrescriptionCreatedOut,
     status_code=status.HTTP_201_CREATED,
 )
 async def add_prescription(
@@ -75,9 +75,9 @@ async def add_prescription(
     current_user: User = Depends(_doctor_or_admin),
     db: AsyncSession = Depends(get_db),
 ):
-    rx = await ClinicalService.add_prescription(encounter_id, payload, current_user, db)
+    rx, cds_alerts = await ClinicalService.add_prescription(encounter_id, payload, current_user, db)
     await db.commit()
-    return rx
+    return PrescriptionCreatedOut(prescription=PrescriptionOut.model_validate(rx), cds_alerts=cds_alerts)
 
 
 @router.post(
@@ -116,7 +116,7 @@ async def add_problem(
 async def get_patient_chart(
     patient_id: uuid.UUID,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_read_db),
 ):
     chart = await ClinicalService.get_chart(patient_id, current_user, db)
     await db.commit()

@@ -48,7 +48,7 @@ def available_slot():
 # ── health ─────────────────────────────────────────────────────────────────────
 
 def test_health():
-    r = httpx.get("http://localhost:8000/health")
+    r = httpx.get("http://localhost:8000/health/ready")
     assert r.status_code == 200
     body = r.json()
     assert body["status"] == "ok"
@@ -286,7 +286,8 @@ def test_clinical_full_workflow(doctor_token, patient_token, doctor_id, patient_
         headers=doc_headers,
     )
     assert r.status_code == 201, f"Add vitals failed: {r.text}"
-    vitals = r.json()
+    vitals_resp = r.json()
+    vitals = vitals_resp["vital"]
     assert vitals["bp_systolic"] == 122
     assert vitals["encounter_id"] == encounter_id
 
@@ -319,7 +320,8 @@ def test_clinical_full_workflow(doctor_token, patient_token, doctor_id, patient_
         headers=doc_headers,
     )
     assert r.status_code == 201, f"Add prescription failed: {r.text}"
-    rx = r.json()
+    rx_resp = r.json()
+    rx = rx_resp["prescription"]
     assert rx["drug_name"] == "Lisinopril"
     assert rx["status"] == "active"
 

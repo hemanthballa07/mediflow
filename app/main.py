@@ -8,8 +8,10 @@ from sqlalchemy import text
 from app.api.v1 import api_router
 from app.api.v1.endpoints import fhir as fhir_router
 from app.api.v1.endpoints import hl7 as hl7_router
+from app.api.v1.endpoints import websockets as ws_router
 from app.db.session import engine, AsyncSessionLocal, _replica_engine
 from app.db.redis import get_redis, close_redis
+from app.db.redis_pubsub import get_pubsub_redis, close_pubsub_redis
 from app.models import models  # noqa: F401 — ensure models are registered
 from app.core.metrics import start_metrics_server
 from app.core.telemetry import setup_telemetry
@@ -26,9 +28,11 @@ async def lifespan(app: FastAPI):
     start_metrics_server(port=9100)
     setup_telemetry(app)
     await get_redis()
+    await get_pubsub_redis()
     yield
     log.info("Shutting down MediFlow API")
     await close_redis()
+    await close_pubsub_redis()
     await engine.dispose()
     if _replica_engine is not None:
         await _replica_engine.dispose()
@@ -60,6 +64,7 @@ app.add_middleware(
 app.include_router(api_router)
 app.include_router(fhir_router.router)
 app.include_router(hl7_router.router)
+app.include_router(ws_router.router)
 
 
 @app.get("/health/live", tags=["health"])

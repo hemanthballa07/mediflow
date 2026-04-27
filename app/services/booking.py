@@ -11,6 +11,7 @@ from app.models.models import Slot, Booking, IdempotencyKey, User, Room
 from app.services.notification import NotificationService
 from app.services.waitlist import WaitlistService
 from app.services.webhooks import WebhookService
+from app.db.redis_pubsub import publish as redis_publish
 from app.schemas.schemas import BookingOut
 from app.core.metrics import (
     bookings_created_total, booking_conflicts_total,
@@ -215,6 +216,15 @@ class BookingService:
             cache_key = f"slots:{slot.doctor_id}:{slot.date}"
             await redis.delete(cache_key)
             log.info("Cache invalidated", extra={"key": cache_key})
+            try:
+                import json as _json
+                from datetime import datetime as _dt, timezone as _tz
+                await redis_publish(
+                    f"slots:{slot.doctor_id}:{slot.date}",
+                    _json.dumps({"slot_id": str(slot.id), "status": "booked", "timestamp": _dt.now(_tz.utc).isoformat()}),
+                )
+            except Exception:
+                pass
 
         log.info("Booking created", extra={"booking_id": str(booking.id), "user_id": str(user_id)})
         return out, 201
@@ -340,6 +350,15 @@ class BookingService:
 
         if slot_doctor_id and slot_date:
             await redis.delete(f"slots:{slot_doctor_id}:{slot_date}")
+            try:
+                import json as _json
+                from datetime import datetime as _dt, timezone as _tz
+                await redis_publish(
+                    f"slots:{slot_doctor_id}:{slot_date}",
+                    _json.dumps({"slot_id": str(booking.slot_id), "status": "available", "timestamp": _dt.now(_tz.utc).isoformat()}),
+                )
+            except Exception:
+                pass
 
         if slot_dept_id:
             # Promote next waiting patient for this department/type
