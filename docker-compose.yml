@@ -36,6 +36,7 @@ services:
       DATABASE_URL: postgresql+asyncpg://mediflow:mediflow@postgres:5432/mediflow
       JWT_SECRET: migrator-placeholder-not-used-for-auth-xx
       ADMIN_API_KEY: migrator-placeholder-not-used-for-auth-xx
+      ENCRYPTION_KEY: bWVkaWZsb3ctZGV2LWtleS0zMi1ieXRlcy1wYWRkZWQ=
     depends_on:
       postgres:
         condition: service_healthy
@@ -58,6 +59,7 @@ services:
       ADMIN_API_KEY: changeme-replace-in-prod-xxxxxxxxxx
       BOOKING_RATE_LIMIT: "10000/second"
       ENVIRONMENT: development
+      ENCRYPTION_KEY: bWVkaWZsb3ctZGV2LWtleS0zMi1ieXRlcy1wYWRkZWQ=
     depends_on:
       postgres:
         condition: service_healthy
@@ -87,6 +89,7 @@ services:
       REDIS_URL: redis://redis:6379/0
       JWT_SECRET: dev-secret-change-in-prod-please
       ADMIN_API_KEY: changeme-replace-in-prod-xxxxxxxxxx
+      ENCRYPTION_KEY: bWVkaWZsb3ctZGV2LWtleS0zMi1ieXRlcy1wYWRkZWQ=
       SMTP_HOST: mailhog
       SMTP_PORT: 1025
       SMTP_FROM: noreply@mediflow.dev

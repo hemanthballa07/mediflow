@@ -3,7 +3,7 @@ from fastapi import APIRouter, Depends, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
-from app.api.v1.deps import require_role, get_current_user
+from app.api.v1.deps import require_role, get_current_user, phi_audit
 from app.models.models import User
 from app.services.clinical import ClinicalService
 from app.schemas.schemas import (
@@ -16,7 +16,7 @@ from app.schemas.schemas import (
     PatientChartOut,
 )
 
-router = APIRouter(tags=["clinical"])
+router = APIRouter(tags=["clinical"], dependencies=[Depends(phi_audit)])
 
 _doctor_or_admin = require_role("doctor", "admin")
 

@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime, date, time
 from typing import Any
 from typing import Literal
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, model_validator
 
 
 # ── Catalog ───────────────────────────────────────────────────────────────────
@@ -114,6 +114,13 @@ class UserOut(BaseModel):
     created_at: datetime
 
     model_config = {"from_attributes": True}
+
+    @model_validator(mode="after")
+    def decrypt_pii(self) -> "UserOut":
+        from app.core.encryption import decrypt
+        self.email = decrypt(self.email)
+        self.name = decrypt(self.name)
+        return self
 
 
 # ── Appointment Types ─────────────────────────────────────────────────────────
@@ -760,3 +767,54 @@ class PaymentOut(BaseModel):
     created_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+# ── Compliance — Password History ─────────────────────────────────────────────
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str
+    new_password: str
+
+
+# ── Compliance — Break Glass ──────────────────────────────────────────────────
+
+class BreakGlassRequest(BaseModel):
+    reason: str
+
+
+# ── Compliance — Deletion Requests ───────────────────────────────────────────
+
+class DeletionRequestOut(BaseModel):
+    id: uuid.UUID
+    patient_id: uuid.UUID
+    requested_at: datetime
+    status: str
+    reviewed_by: uuid.UUID | None
+    reviewed_at: datetime | None
+    notes: str | None
+
+    model_config = {"from_attributes": True}
+
+
+class DeletionRequestReview(BaseModel):
+    status: Literal["approved", "rejected", "completed"]
+    notes: str | None = None
+
+
+# ── Compliance — GDPR Export ──────────────────────────────────────────────────
+
+class PatientDataExport(BaseModel):
+    patient_id: uuid.UUID
+    email: str
+    name: str
+    role: str
+    created_at: datetime
+    bookings: list[Any] = []
+    lab_reports: list[Any] = []
+    encounters: list[Any] = []
+    allergies: list[Any] = []
+    problem_list: list[Any] = []
+    referrals: list[Any] = []
+    orders: list[Any] = []
+    insurance: list[Any] = []
+    claims: list[Any] = []

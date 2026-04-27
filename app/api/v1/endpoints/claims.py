@@ -3,13 +3,13 @@ from fastapi import APIRouter, Depends, Header, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
-from app.api.v1.deps import require_role, get_current_user
+from app.api.v1.deps import require_role, get_current_user, phi_audit
 from app.models.models import User
 from app.services.claims import ClaimsService
 from app.services.payments import PaymentsService
 from app.schemas.schemas import ClaimCreate, ClaimDetailOut, ClaimOut, PaymentCreate, PaymentOut
 
-router = APIRouter(tags=["claims"])
+router = APIRouter(tags=["claims"], dependencies=[Depends(phi_audit)])
 
 _admin_only = require_role("admin")
 _doctor_or_admin = require_role("doctor", "admin")

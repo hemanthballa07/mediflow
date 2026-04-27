@@ -7,10 +7,10 @@ from app.db.session import get_db
 from app.db.redis import get_redis
 from app.schemas.schemas import ReportOut, ReportPage, ReportCreate
 from app.services.reports import ReportService
-from app.api.v1.deps import get_current_user, require_role
+from app.api.v1.deps import get_current_user, require_role, phi_audit
 from app.models.models import User
 
-router = APIRouter(prefix="/reports", tags=["reports"])
+router = APIRouter(prefix="/reports", tags=["reports"], dependencies=[Depends(phi_audit)])
 
 
 @router.post("", response_model=ReportOut, status_code=201)

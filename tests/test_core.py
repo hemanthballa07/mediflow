@@ -1646,3 +1646,234 @@ async def test_charge_master_service_create():
         assert call_kwargs["cpt_code"] == "99213"
         assert call_kwargs["base_price"] == 150.00
     assert result is mock_entry
+
+
+# ── Phase 6: Compliance ───────────────────────────────────────────────────────
+
+def test_pii_encrypt_decrypt_roundtrip():
+    """encrypt() then decrypt() returns original plaintext."""
+    import os
+    os.environ.setdefault("ENCRYPTION_KEY", "bWVkaWZsb3ctZGV2LWtleS0zMi1ieXRlcy1wYWRkZWQ=")
+    from app.core.encryption import encrypt, decrypt
+    plaintext = "patient@mediflow.dev"
+    ciphertext = encrypt(plaintext)
+    assert ciphertext != plaintext
+    assert decrypt(ciphertext) == plaintext
+
+
+def test_email_hash_is_deterministic():
+    """Same email always produces same hash."""
+    import os
+    os.environ.setdefault("ENCRYPTION_KEY", "bWVkaWZsb3ctZGV2LWtleS0zMi1ieXRlcy1wYWRkZWQ=")
+    from app.core.encryption import email_hash
+    h1 = email_hash("Patient@MediFlow.dev")
+    h2 = email_hash("patient@mediflow.dev")
+    assert h1 == h2
+
+
+def test_email_hash_differs_from_plaintext():
+    """email_hash output is not the plaintext email."""
+    import os
+    os.environ.setdefault("ENCRYPTION_KEY", "bWVkaWZsb3ctZGV2LWtleS0zMi1ieXRlcy1wYWRkZWQ=")
+    from app.core.encryption import email_hash
+    email = "test@example.com"
+    assert email_hash(email) != email
+
+
+@pytest.mark.asyncio
+async def test_password_history_reuse_rejected():
+    """change_password raises 422 when new password matches a recent one."""
+    from fastapi import HTTPException
+    from app.services.auth import AuthService
+    from app.core.security import hash_password
+
+    user = MagicMock()
+    user.id = uuid.uuid4()
+    user.hashed_password = hash_password("current-password")
+
+    old_hash = hash_password("my-old-password")
+    history_entry = MagicMock()
+    history_entry.hashed_password = old_hash
+
+    mock_history_result = MagicMock()
+    mock_history_result.scalars.return_value.all.return_value = [history_entry]
+
+    mock_db = AsyncMock()
+    mock_db.execute = AsyncMock(return_value=mock_history_result)
+    mock_db.add = MagicMock()
+    mock_db.flush = AsyncMock()
+    mock_db.commit = AsyncMock()
+
+    with patch("app.services.auth.verify_password", side_effect=[True, True]):
+        with pytest.raises(HTTPException) as exc_info:
+            await AuthService.change_password(
+                user, "current-password", "my-old-password", mock_db
+            )
+
+    assert exc_info.value.status_code == 422
+    assert "last 5" in exc_info.value.detail.lower()
+
+
+@pytest.mark.asyncio
+async def test_password_history_new_password_accepted():
+    """change_password succeeds when new password is not in history."""
+    from app.services.auth import AuthService
+    from app.core.security import hash_password
+
+    user = MagicMock()
+    user.id = uuid.uuid4()
+    user.hashed_password = hash_password("current-password")
+
+    mock_history_result = MagicMock()
+    mock_history_result.scalars.return_value.all.return_value = []
+
+    mock_db = AsyncMock()
+    mock_db.execute = AsyncMock(return_value=mock_history_result)
+    mock_db.add = MagicMock()
+    mock_db.flush = AsyncMock()
+    mock_db.commit = AsyncMock()
+
+    with patch("app.services.auth.verify_password", side_effect=[True, False]):
+        await AuthService.change_password(user, "current-password", "brand-new-pw", mock_db)
+
+    mock_db.commit.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_password_change_wrong_current_raises_400():
+    """change_password raises 400 when current_password is wrong."""
+    from fastapi import HTTPException
+    from app.services.auth import AuthService
+
+    user = MagicMock()
+    user.id = uuid.uuid4()
+    user.hashed_password = "some-hash"
+
+    mock_db = AsyncMock()
+
+    with patch("app.services.auth.verify_password", return_value=False):
+        with pytest.raises(HTTPException) as exc_info:
+            await AuthService.change_password(user, "wrong", "new-pass", mock_db)
+
+    assert exc_info.value.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_break_glass_logs_break_glass_access():
+    """break_glass writes BREAK_GLASS_ACCESS to audit_log."""
+    from app.services.compliance import ComplianceService
+
+    admin = MagicMock()
+    admin.role = "admin"
+    admin.id = uuid.uuid4()
+
+    patient_id = uuid.uuid4()
+    mock_patient = MagicMock()
+    mock_patient.id = patient_id
+
+    mock_patient_result = MagicMock()
+    mock_patient_result.scalar_one_or_none.return_value = mock_patient
+
+    mock_db = AsyncMock()
+    mock_db.execute = AsyncMock(return_value=mock_patient_result)
+    mock_db.add = MagicMock()
+    mock_db.flush = AsyncMock()
+    mock_db.commit = AsyncMock()
+
+    mock_chart = MagicMock()
+
+    with patch("app.services.compliance.AuditService.log", new=AsyncMock()) as mock_audit, \
+         patch("app.services.clinical.ClinicalService.get_chart", new=AsyncMock(return_value=mock_chart)):
+        result = await ComplianceService.break_glass(admin, patient_id, "Emergency trauma", mock_db)
+
+    mock_audit.assert_awaited_once()
+    call_kwargs = mock_audit.call_args.kwargs
+    assert call_kwargs["action"] == "BREAK_GLASS_ACCESS"
+    assert call_kwargs["user_id"] == admin.id
+    assert call_kwargs["target"] == str(patient_id)
+    assert call_kwargs["details"]["reason"] == "Emergency trauma"
+    assert result is mock_chart
+
+
+@pytest.mark.asyncio
+async def test_gdpr_export_denies_cross_patient():
+    """Patient cannot export another patient's data."""
+    from fastapi import HTTPException
+    from app.services.compliance import ComplianceService
+
+    patient_user = MagicMock()
+    patient_user.role = "patient"
+    patient_user.id = uuid.uuid4()
+
+    other_patient_id = uuid.uuid4()
+    mock_db = AsyncMock()
+
+    with pytest.raises(HTTPException) as exc_info:
+        await ComplianceService.export_patient_data(patient_user, other_patient_id, mock_db)
+
+    assert exc_info.value.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_deletion_request_review_terminal_state_raises_422():
+    """Reviewing an already-approved deletion request raises 422."""
+    from fastapi import HTTPException
+    from app.services.compliance import ComplianceService
+
+    admin = MagicMock()
+    admin.role = "admin"
+    admin.id = uuid.uuid4()
+
+    mock_req = MagicMock()
+    mock_req.status = "approved"
+
+    mock_result = MagicMock()
+    mock_result.scalar_one_or_none.return_value = mock_req
+
+    mock_db = AsyncMock()
+    mock_db.execute = AsyncMock(return_value=mock_result)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await ComplianceService.review_deletion_request(
+            admin, uuid.uuid4(), "rejected", None, mock_db
+        )
+
+    assert exc_info.value.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_phi_audit_logs_accessed():
+    """phi_audit dependency writes PHI_ACCESSED to audit_log."""
+    from app.api.v1.deps import phi_audit
+
+    mock_user = MagicMock()
+    mock_user.id = uuid.uuid4()
+
+    mock_request = MagicMock()
+    mock_request.url.path = "/api/v1/patients/abc/chart"
+    mock_request.method = "GET"
+
+    mock_db = AsyncMock()
+    mock_db.add = MagicMock()
+    mock_db.flush = AsyncMock()
+
+    with patch("app.services.audit.AuditService.log", new=AsyncMock()) as mock_audit:
+        await phi_audit(request=mock_request, current_user=mock_user, db=mock_db)
+
+    mock_audit.assert_awaited_once()
+    call_kwargs = mock_audit.call_args.kwargs
+    assert call_kwargs["action"] == "PHI_ACCESSED"
+    assert call_kwargs["user_id"] == mock_user.id
+
+
+def test_deletion_request_schema_valid_statuses():
+    """DeletionRequestReview only accepts approved/rejected/completed."""
+    from pydantic import ValidationError
+    from app.schemas.schemas import DeletionRequestReview
+
+    for s in ("approved", "rejected", "completed"):
+        r = DeletionRequestReview(status=s)
+        assert r.status == s
+
+    with pytest.raises(ValidationError):
+        DeletionRequestReview(status="pending")

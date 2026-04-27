@@ -93,7 +93,8 @@ class User(Base):
     __tablename__ = "users"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
-    email: Mapped[str] = mapped_column(Text, unique=True, nullable=False)
+    email: Mapped[str] = mapped_column(Text, nullable=False)
+    email_hash: Mapped[str | None] = mapped_column(Text, unique=True, nullable=True)
     hashed_password: Mapped[str] = mapped_column(Text, nullable=False)
     name: Mapped[str] = mapped_column(Text, nullable=False)
     role: Mapped[str] = mapped_column(String(20), nullable=False, default="patient")  # patient | doctor | admin
@@ -111,6 +112,12 @@ class User(Base):
     )
     notifications: Mapped[list["Notification"]] = relationship(
         "Notification", back_populates="user"
+    )
+    password_history: Mapped[list["PasswordHistory"]] = relationship(
+        "PasswordHistory", back_populates="user", order_by="PasswordHistory.created_at.desc()"
+    )
+    deletion_requests: Mapped[list["DeletionRequest"]] = relationship(
+        "DeletionRequest", back_populates="patient", foreign_keys="DeletionRequest.patient_id"
     )
 
 
@@ -814,3 +821,42 @@ class Payment(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
 
     claim: Mapped["Claim"] = relationship("Claim", back_populates="payments")
+
+
+# ─────────────────────────────────────────
+# Password History
+# ─────────────────────────────────────────
+class PasswordHistory(Base):
+    __tablename__ = "password_history"
+    __table_args__ = (
+        Index("ix_password_history_user_created", "user_id", "created_at"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
+    user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    hashed_password: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+
+    user: Mapped["User"] = relationship("User", back_populates="password_history")
+
+
+# ─────────────────────────────────────────
+# Deletion Requests (GDPR)
+# ─────────────────────────────────────────
+class DeletionRequest(Base):
+    __tablename__ = "deletion_requests"
+    __table_args__ = (
+        Index("ix_deletion_requests_patient_status", "patient_id", "status"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
+    patient_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    requested_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="pending")
+    # pending | approved | rejected | completed
+    reviewed_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    patient: Mapped["User"] = relationship("User", back_populates="deletion_requests", foreign_keys=[patient_id])
+    reviewer: Mapped["User | None"] = relationship("User", foreign_keys=[reviewed_by])

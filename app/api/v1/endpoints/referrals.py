@@ -3,12 +3,12 @@ from fastapi import APIRouter, Depends, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
-from app.api.v1.deps import require_role, get_current_user
+from app.api.v1.deps import require_role, get_current_user, phi_audit
 from app.models.models import User
 from app.services.referrals import ReferralsService
 from app.schemas.schemas import ReferralCreate, ReferralOut, ReferralStatusUpdate
 
-router = APIRouter(tags=["referrals"])
+router = APIRouter(tags=["referrals"], dependencies=[Depends(phi_audit)])
 
 _doctor_or_admin = require_role("doctor", "admin")
 

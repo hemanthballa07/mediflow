@@ -1,5 +1,5 @@
 import uuid
-from fastapi import Depends, HTTPException, Security, status
+from fastapi import Depends, HTTPException, Request, Security, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from jwt.exceptions import InvalidTokenError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -45,3 +45,18 @@ def require_role(*roles: str):
             raise HTTPException(status.HTTP_403_FORBIDDEN, detail="Insufficient permissions")
         return current_user
     return _check
+
+
+async def phi_audit(
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    from app.services.audit import AuditService
+    await AuditService.log(
+        db,
+        action="PHI_ACCESSED",
+        user_id=current_user.id,
+        target=request.url.path,
+        details={"method": request.method},
+    )

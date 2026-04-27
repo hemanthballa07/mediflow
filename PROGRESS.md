@@ -72,8 +72,9 @@ Living source of truth. Reflects current project state at all times.
 - ✅ Role-scoped endpoints (patient/doctor/admin)
 
 ### Tests
-- ✅ 38 unit tests (pytest) — includes 11 Phase 3 clinical tests
-- ✅ 13 integration tests (live Docker stack) — includes Phase 3 full workflow
+- ✅ 69 unit tests (pytest) — includes 11 Phase 3 clinical tests + 10 Phase 4 referrals/orders tests + 11 Phase 5 billing tests + 10 Phase 6 compliance tests
+- ✅ 19 integration tests (live Docker stack) — includes Phase 3 + Phase 4 + Phase 5 flows
+- ✅ **88/88 total passing** (estimated — Phase 6 unit tests added; integration suite unchanged)
 - ✅ k6 load tests: benchmark.js, contention_test.js
 - ✅ Contention test proven: 50 VUs, 1 booking through, 13,437 conflicts, 0 server errors
 
@@ -117,21 +118,44 @@ Living source of truth. Reflects current project state at all times.
 - ✅ Write endpoints: `POST /encounters`, `/encounters/{id}/vitals`, `/encounters/{id}/diagnoses`, `/encounters/{id}/prescriptions`, `/patients/{id}/allergies`, `/patients/{id}/problems` — doctor/admin only
 
 ### Phase 4 — Referrals + Orders
-- ⏳ `referrals` (cross-department patient routing)
-- ⏳ `orders` (lab/imaging/procedure)
-- ⏳ Link reports to orders
+- ✅ `referrals` table — cross-department patient routing; urgency (routine|urgent|stat); status machine (pending→accepted|rejected, accepted→completed); access-scoped by role
+- ✅ `orders` table — lab/imaging/procedure orders with CPT codes; patient_id derived from encounter; existence-masked for wrong-doctor access
+- ✅ `lab_reports.order_id` — nullable FK links reports to orders (migration 006)
+- ✅ Migration `006_referrals_orders.py` — creates referrals, orders; ALTER TABLE lab_reports ADD COLUMN order_id
+- ✅ `app/services/referrals.py` — ReferralsService: create, list_sent, list_received, list_for_patient, update_status; all PHI reads audited
+- ✅ `app/services/orders.py` — OrdersService: create, get (404-masked), list_for_encounter; all PHI reads audited; patient→403
+- ✅ Endpoints: `POST /referrals`, `GET /referrals/sent`, `GET /referrals/received`, `GET /referrals/my`, `PATCH /referrals/{id}/status`
+- ✅ Endpoints: `POST /orders`, `GET /orders/{id}`, `GET /encounters/{id}/orders`
+- ✅ 10 new unit tests (Phase 4 referrals + orders service access rules)
+- ✅ 3 new integration tests (orders lifecycle, referral lifecycle, invalid transition)
 
 ### Phase 5 — Billing & Insurance (US)
-- ⏳ `insurance_plans`, `patient_insurance`, `charge_masters`, `claims`, `payments`
-- ⏳ CPT/ICD-10 codes
-- ⏳ Idempotent payment endpoint
+- ✅ `insurance_plans` — name, payer_id (US payer ID), plan_type (HMO|PPO|EPO|POS|HDHP)
+- ✅ `patient_insurance` — member_id, group_number, effective/termination dates, is_primary; partial unique index enforces single primary per patient
+- ✅ `charge_masters` — CPT code pricing table; department-scoped; active flag
+- ✅ `claims` — status machine (draft→submitted→accepted|rejected|paid); total_charged/total_paid (Numeric 10,2); submitted_at, adjudicated_at
+- ✅ `claim_line_items` — per-CPT line with ICD-10 codes (text array), units, unit_price, total_price; optional order_id FK
+- ✅ `payments` — payer (patient|insurance), payment_method (check|eft|card|cash), idempotent via IdempotencyKey; auto-transitions claim→paid when total_paid >= total_charged; SELECT FOR UPDATE prevents double-credit
+- ✅ Migration `007_billing_insurance.py` — all 6 tables + indexes + partial unique (down_revision = 006)
+- ✅ `app/services/insurance.py` — InsuranceService: create_plan, attach_to_patient (enforce single primary), list_for_patient; all PHI reads audited
+- ✅ `app/services/charge_master.py` — ChargeMasterService: create, list (filter by cpt_code), get_by_cpt
+- ✅ `app/services/claims.py` — ClaimsService: create (pricing from charge master), submit (state machine), get (404-masked for doctor scope), list_for_patient; all PHI reads audited
+- ✅ `app/services/payments.py` — PaymentsService: idempotent record_payment; replicates BookingService idempotency pattern
+- ✅ Endpoints: `POST /admin/insurance-plans`, `POST|GET /patients/{id}/insurance`
+- ✅ Endpoints: `POST /admin/charge-masters`, `GET /charge-masters?cpt_code=`
+- ✅ Endpoints: `POST /claims`, `POST /claims/{id}/submit`, `GET /claims/{id}`, `GET /patients/{id}/claims`, `POST /claims/{id}/payments`
+- ✅ 11 new unit tests + 3 new integration tests
 
 ### Phase 6 — Compliance + Audit Hardening
-- ⏳ PHI access logging middleware
-- ⏳ Break-glass endpoint
-- ⏳ GDPR data export + delete request
-- ⏳ PII encryption at rest
-- ⏳ Password history + rotation
+- ✅ PHI access middleware — `phi_audit` FastAPI dependency wired to clinical, reports, claims, insurance, orders, referrals routers; auto-logs `PHI_ACCESSED` without per-endpoint calls
+- ✅ Break-glass endpoint — `POST /admin/break-glass/{patient_id}` (admin + X-Admin-Api-Key); mandatory `reason`; logs `BREAK_GLASS_ACCESS` with admin_id + reason + timestamp; returns patient full chart
+- ✅ GDPR export — `GET /patients/{id}/export` — returns all patient data (bookings, encounters, claims, insurance, reports, referrals, orders, vitals, diagnoses, prescriptions, allergies, problems); patient(own)/admin; audit logged
+- ✅ GDPR deletion requests — `deletion_requests` table with status machine (pending→approved|rejected|completed); `POST/GET /patients/{id}/deletion-requests` + `PATCH /deletion-requests/{id}/status`
+- ✅ Password history — `password_history` table; enforce no reuse of last 5 passwords; `POST /auth/change-password`; family token invalidation on change
+- ✅ PII encryption — AES-256 (Fernet) encrypts `users.email` + `users.name` at rest; `email_hash` HMAC-SHA256 column for login lookup; transparent in service layer
+- ✅ Migration `008_compliance.py` — password_history, deletion_requests tables; email_hash column on users; PII data migration via ENCRYPTION_KEY
+- ✅ `app/core/encryption.py` — Fernet encrypt/decrypt + HMAC email_hash
+- ✅ 10 new unit tests (Phase 6 compliance + PII encryption)
 
 ### Phase 7 — Reliability + Tracing
 - ⏳ `/health/live` + `/health/ready` split
@@ -160,4 +184,4 @@ make clean           # stop + remove volumes
 ```
 
 ## Next Migration
-Next file: `migrations/versions/006_referrals_orders.py`
+Next file: `migrations/versions/009_*.py`

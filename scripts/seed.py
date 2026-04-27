@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.session import AsyncSessionLocal, engine
 from app.models.models import User, Doctor, Slot, LabReport, Facility, Department, Specialty, Room
 from app.core.security import hash_password
+from app.core.encryption import encrypt, email_hash as compute_email_hash
 
 # Match the backfill UUIDs from migration 002 so re-seeding on existing DB is idempotent
 DEFAULT_FACILITY_ID  = uuid.UUID("00000000-0000-0000-0000-000000000001")
@@ -105,23 +106,27 @@ async def seed():
         ])
         await db.flush()
 
+        def make_user(email: str, password: str, name: str, role: str, **kwargs) -> User:
+            return User(
+                email=encrypt(email),
+                email_hash=compute_email_hash(email),
+                hashed_password=hash_password(password),
+                name=encrypt(name),
+                role=role,
+                **kwargs,
+            )
+
         # ── Admin ──────────────────────────────────────────────────────────────
-        admin = User(
-            email="admin@mediflow.dev",
-            hashed_password=hash_password("admin123"),
-            name="Admin User",
-            role="admin",
+        admin = make_user(
+            "admin@mediflow.dev", "admin123", "Admin User", "admin",
             home_facility_id=main_hospital.id,
         )
         db.add(admin)
         await db.flush()
 
         # ── Doctor 1 — General Practice (main hospital) ────────────────────────
-        doc_user = User(
-            email="doctor@mediflow.dev",
-            hashed_password=hash_password("doctor123"),
-            name="Dr. Sarah Chen",
-            role="doctor",
+        doc_user = make_user(
+            "doctor@mediflow.dev", "doctor123", "Dr. Sarah Chen", "doctor",
             home_facility_id=main_hospital.id,
         )
         db.add(doc_user)
@@ -138,11 +143,8 @@ async def seed():
         await db.flush()
 
         # ── Doctor 2 — Cardiology (main hospital) ──────────────────────────────
-        cardio_user = User(
-            email="cardiologist@mediflow.dev",
-            hashed_password=hash_password("cardio123"),
-            name="Dr. James Park",
-            role="doctor",
+        cardio_user = make_user(
+            "cardiologist@mediflow.dev", "cardio123", "Dr. James Park", "doctor",
             home_facility_id=main_hospital.id,
         )
         db.add(cardio_user)
@@ -159,11 +161,8 @@ async def seed():
         await db.flush()
 
         # ── Patient ────────────────────────────────────────────────────────────
-        patient = User(
-            email="patient@mediflow.dev",
-            hashed_password=hash_password("patient123"),
-            name="John Patient",
-            role="patient",
+        patient = make_user(
+            "patient@mediflow.dev", "patient123", "John Patient", "patient",
             home_facility_id=main_hospital.id,
         )
         db.add(patient)

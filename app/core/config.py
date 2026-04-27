@@ -28,12 +28,16 @@ class Settings(BaseSettings):
     NOTIFICATION_BATCH_SIZE: int = 50
     WAITLIST_NOTIFICATION_EXPIRY_HOURS: int = 48
 
+    ENCRYPTION_KEY: str = "bWVkaWZsb3ctZGV2LWtleS0zMi1ieXRlcy1wYWRkZWQ="
+
     @model_validator(mode="after")
     def validate_secrets(self) -> "Settings":
         if len(self.JWT_SECRET) < 32:
             raise ValueError("JWT_SECRET must be at least 32 characters")
         if len(self.ADMIN_API_KEY) < 32:
             raise ValueError("ADMIN_API_KEY must be at least 32 characters")
+        if len(self.ENCRYPTION_KEY) < 32:
+            raise ValueError("ENCRYPTION_KEY must be a valid Fernet key (44 chars)")
         return self
 
     model_config = SettingsConfigDict(env_file=".env")
