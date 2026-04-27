@@ -9,6 +9,7 @@ from fastapi import HTTPException, status
 from app.models.models import Claim, IdempotencyKey, Payment, User
 from app.schemas.schemas import PaymentCreate, PaymentOut
 from app.services.audit import AuditService
+from app.services.webhooks import WebhookService
 
 
 class PaymentsService:
@@ -82,15 +83,27 @@ class PaymentsService:
 
         new_total_paid = Decimal(str(claim.total_paid)) + Decimal(str(payload.amount))
         claim.total_paid = new_total_paid
+        claim_now_paid = False
         if new_total_paid >= Decimal(str(claim.total_charged)):
             claim.status = "paid"
             claim.adjudicated_at = datetime.now(timezone.utc)
+            claim_now_paid = True
         await db.flush()
 
         out = PaymentOut.model_validate(payment)
         idem_record.status = "SUCCESS"
         idem_record.response = out.model_dump(mode="json")
         idem_record.updated_at = datetime.now(timezone.utc)
+
+        if claim_now_paid:
+            try:
+                await WebhookService.enqueue(
+                    "claim.paid",
+                    {"event": "claim.paid", "claim_id": str(claim_id), "patient_id": str(claim.patient_id), "total_paid": str(new_total_paid)},
+                    db,
+                )
+            except Exception:
+                pass
 
         await AuditService.log(
             db=db,

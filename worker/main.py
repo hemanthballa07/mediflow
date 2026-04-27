@@ -1,19 +1,22 @@
 """
 Notification worker — polls the notifications outbox, dispatches email/SMS,
-handles exponential-backoff retries.
+handles exponential-backoff retries. Also processes webhook deliveries.
 
 Run: python -m worker.main
 """
 import asyncio
+import json
 import smtplib
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from datetime import datetime, timezone, timedelta
 
+import httpx
 from sqlalchemy import select
+from sqlalchemy.orm import selectinload
 
 from app.db.session import AsyncSessionLocal
-from app.models.models import Notification
+from app.models.models import Notification, WebhookDelivery, Webhook
 from app.core.config import get_settings
 from app.core.logging import get_logger
 
@@ -114,6 +117,82 @@ async def _process_batch() -> int:
     return processed
 
 
+# ── Webhook delivery ──────────────────────────────────────────────────────────
+
+_WEBHOOK_BACKOFF_MINUTES = [1, 5, 30, 120, 480]
+_WEBHOOK_MAX_ATTEMPTS = 5
+_WEBHOOK_TIMEOUT = 10
+
+
+async def _process_webhook_batch() -> int:
+    now = datetime.now(timezone.utc)
+    processed = 0
+
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(
+            select(WebhookDelivery)
+            .options(selectinload(WebhookDelivery.webhook))
+            .where(
+                WebhookDelivery.status.in_(["pending", "retrying"]),
+                WebhookDelivery.next_retry_at <= now,
+            )
+            .order_by(WebhookDelivery.next_retry_at)
+            .limit(50)
+            .with_for_update(skip_locked=True)
+        )
+        deliveries = result.scalars().all()
+
+        async with httpx.AsyncClient(timeout=_WEBHOOK_TIMEOUT) as client:
+            for delivery in deliveries:
+                wh = delivery.webhook
+                if wh is None or not wh.active:
+                    delivery.status = "failed"
+                    delivery.last_error = "webhook inactive or deleted"
+                    processed += 1
+                    continue
+
+                headers = {
+                    "Content-Type": "application/json",
+                    "X-MediFlow-Signature": delivery.signature,
+                    "X-MediFlow-Event": delivery.event,
+                    "X-MediFlow-Delivery": str(delivery.id),
+                }
+                body = json.dumps(delivery.payload, sort_keys=True, separators=(",", ":"))
+                try:
+                    resp = await client.post(wh.url, content=body, headers=headers)
+                    delivery.last_response_status = resp.status_code
+                    if 200 <= resp.status_code < 300:
+                        delivery.status = "delivered"
+                        delivery.delivered_at = now
+                        log.info("Webhook delivered", extra={
+                            "id": str(delivery.id), "event": delivery.event, "url": wh.url
+                        })
+                    else:
+                        raise Exception(f"HTTP {resp.status_code}")
+                except Exception as exc:
+                    delivery.attempts += 1
+                    delivery.last_error = str(exc)[:500]
+                    if delivery.attempts >= _WEBHOOK_MAX_ATTEMPTS:
+                        delivery.status = "failed"
+                        log.error("Webhook permanently failed", extra={
+                            "id": str(delivery.id), "error": delivery.last_error
+                        })
+                    else:
+                        delay = _WEBHOOK_BACKOFF_MINUTES[min(delivery.attempts - 1, len(_WEBHOOK_BACKOFF_MINUTES) - 1)]
+                        delivery.status = "retrying"
+                        delivery.next_retry_at = now + timedelta(minutes=delay)
+                        log.warning("Webhook retry queued", extra={
+                            "id": str(delivery.id),
+                            "attempt": delivery.attempts,
+                            "next_at": delivery.next_retry_at.isoformat(),
+                        })
+                processed += 1
+
+        await db.commit()
+
+    return processed
+
+
 # ── Main loop ─────────────────────────────────────────────────────────────────
 
 async def _run() -> None:
@@ -129,6 +208,13 @@ async def _run() -> None:
                 log.info(f"Dispatched {n} notifications")
         except Exception as exc:
             log.error("Worker iteration error", extra={"error": str(exc)})
+
+        try:
+            w = await _process_webhook_batch()
+            if w:
+                log.info(f"Processed {w} webhook deliveries")
+        except Exception as exc:
+            log.error("Webhook worker iteration error", extra={"error": str(exc)})
 
         await asyncio.sleep(settings.NOTIFICATION_POLL_INTERVAL)
 

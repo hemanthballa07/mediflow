@@ -9,6 +9,7 @@ from app.models.models import (
     Encounter, Vital, Diagnosis, Prescription, Allergy, ProblemList,
     Doctor, Booking, Slot, User,
 )
+from app.services.webhooks import WebhookService
 from app.schemas.schemas import (
     EncounterCreate, VitalCreate, DiagnosisCreate, PrescriptionCreate,
     AllergyCreate, ProblemCreate, PatientChartOut,
@@ -75,6 +76,14 @@ class ClinicalService:
         db.add(enc)
         await db.flush()
         await db.refresh(enc)
+        try:
+            await WebhookService.enqueue(
+                "encounter.created",
+                {"event": "encounter.created", "encounter_id": str(enc.id), "patient_id": str(enc.patient_id), "doctor_id": str(enc.doctor_id), "encounter_date": str(enc.encounter_date)},
+                db,
+            )
+        except Exception:
+            pass
         return enc
 
     # ── vitals ────────────────────────────────────────────────────────────────

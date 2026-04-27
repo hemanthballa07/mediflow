@@ -10,6 +10,7 @@ import redis.asyncio as aioredis
 from app.models.models import Slot, Booking, IdempotencyKey, User, Room
 from app.services.notification import NotificationService
 from app.services.waitlist import WaitlistService
+from app.services.webhooks import WebhookService
 from app.schemas.schemas import BookingOut
 from app.core.metrics import (
     bookings_created_total, booking_conflicts_total,
@@ -162,6 +163,14 @@ class BookingService:
                 target=str(booking.id),
                 details={"slot_id": str(slot_id)},
             )
+            try:
+                await WebhookService.enqueue(
+                    "booking.created",
+                    {"event": "booking.created", "booking_id": str(booking.id), "user_id": str(user_id), "slot_id": str(slot_id), "status": booking.status},
+                    db,
+                )
+            except Exception:
+                pass
             await db.commit()
 
         except IntegrityError:
@@ -296,6 +305,14 @@ class BookingService:
             user_id=user_id,
             target=str(booking_id),
         )
+        try:
+            await WebhookService.enqueue(
+                "booking.cancelled",
+                {"event": "booking.cancelled", "booking_id": str(booking_id), "user_id": str(user_id)},
+                db,
+            )
+        except Exception:
+            pass
 
         # Queue cancellation notification
         user_res = await db.execute(select(User).where(User.id == user_id))

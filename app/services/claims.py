@@ -9,6 +9,7 @@ from app.models.models import Claim, ClaimLineItem, Doctor, Encounter, PatientIn
 from app.schemas.schemas import ClaimCreate
 from app.services.audit import AuditService
 from app.services.charge_master import ChargeMasterService
+from app.services.webhooks import WebhookService
 
 
 class ClaimsService:
@@ -114,6 +115,14 @@ class ClaimsService:
             user_id=current_user.id,
             target=str(claim_id),
         )
+        try:
+            await WebhookService.enqueue(
+                "claim.submitted",
+                {"event": "claim.submitted", "claim_id": str(claim_id), "patient_id": str(claim.patient_id), "status": "submitted"},
+                db,
+            )
+        except Exception:
+            pass
         return claim
 
     @staticmethod

@@ -6,14 +6,16 @@ from slowapi.errors import RateLimitExceeded
 from sqlalchemy import text
 
 from app.api.v1 import api_router
-from app.db.session import engine, AsyncSessionLocal
+from app.api.v1.endpoints import fhir as fhir_router
+from app.api.v1.endpoints import hl7 as hl7_router
+from app.db.session import engine, AsyncSessionLocal, _replica_engine
 from app.db.redis import get_redis, close_redis
 from app.models import models  # noqa: F401 — ensure models are registered
 from app.core.metrics import start_metrics_server
+from app.core.telemetry import setup_telemetry
 from app.middleware.metrics import MetricsMiddleware
 from app.core.logging import get_logger
 from app.core.limiter import limiter
-from app.schemas.schemas import HealthResponse
 
 log = get_logger(__name__)
 
@@ -21,14 +23,15 @@ log = get_logger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     log.info("Starting MediFlow API")
-    # Start Prometheus metrics server on :9100 (separate from API port)
     start_metrics_server(port=9100)
-    # Warm Redis connection
+    setup_telemetry(app)
     await get_redis()
     yield
     log.info("Shutting down MediFlow API")
     await close_redis()
     await engine.dispose()
+    if _replica_engine is not None:
+        await _replica_engine.dispose()
 
 
 def _rate_limit_handler(request: Request, exc: RateLimitExceeded) -> JSONResponse:
@@ -55,10 +58,17 @@ app.add_middleware(
 
 # ── Routers ───────────────────────────────────────────────────────────────────
 app.include_router(api_router)
+app.include_router(fhir_router.router)
+app.include_router(hl7_router.router)
 
 
-@app.get("/health", response_model=HealthResponse, tags=["health"])
-async def health():
+@app.get("/health/live", tags=["health"])
+async def health_live():
+    return {"status": "ok"}
+
+
+@app.get("/health/ready", tags=["health"])
+async def health_ready():
     db_status = "ok"
     redis_status = "ok"
 
@@ -75,8 +85,7 @@ async def health():
         redis_status = "error"
 
     overall = "ok" if db_status == "ok" and redis_status == "ok" else "error"
-    status_code = 200 if overall == "ok" else 503
     return JSONResponse(
         content={"status": overall, "service": "mediflow", "db": db_status, "redis": redis_status},
-        status_code=status_code,
+        status_code=200 if overall == "ok" else 503,
     )

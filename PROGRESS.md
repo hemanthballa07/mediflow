@@ -158,17 +158,19 @@ Living source of truth. Reflects current project state at all times.
 - ✅ 10 new unit tests (Phase 6 compliance + PII encryption)
 
 ### Phase 7 — Reliability + Tracing
-- ⏳ `/health/live` + `/health/ready` split
-- ⏳ OpenTelemetry → Tempo in Docker Compose
-- ⏳ Read replica routing
-- ⏳ Circuit breaker on Redis
-- ⏳ SLO burn-rate Grafana panels
+- ✅ `/health/live` — always 200 (process probe); `/health/ready` — DB + Redis probe, 503 on failure; old `/health` removed
+- ✅ Redis circuit breaker — `execute_redis(coro)` in `app/db/redis.py`; 5 failures → OPEN; half-open after 30s; structured JSON log on transitions; `ReportService` cache calls wrapped; health probe bypasses CB
+- ✅ Read replica routing — `READ_REPLICA_URL` optional env; `get_read_db` dep in `session.py` (falls back to primary); wired to GET /reports, GET /reports/{id}, GET /patients/{id}/chart, GET /patients/{id}/claims, GET /claims/{id}, all GET /catalog/* endpoints
+- ✅ OpenTelemetry → Tempo — `app/core/telemetry.py` setup (FastAPI + SQLAlchemy + Redis instrumentation); graceful no-op on Tempo unreachable; `OTEL_EXPORTER_OTLP_ENDPOINT` env var; Tempo service in docker-compose (port 3200 + 4317); `deploy/tempo/tempo.yaml` local storage config; Grafana Tempo datasource provisioned; `opentelemetry-instrumentation-redis` added to requirements.txt; exemplar queries on latency panels
+- ✅ SLO burn-rate Grafana panels — P99 latency SLO (500ms budget, 2× burn alert/1h) + error rate SLO (1% budget, 5× burn alert/5m); 4 new panels + 1 row appended to `mediflow_overview.json`
 
 ### Phase 8 — FHIR R4 + HL7
-- ⏳ `/fhir/r4/` read-only router (Patient, Practitioner, Appointment, Encounter, Observation, Condition, MedicationRequest, DiagnosticReport)
-- ⏳ CapabilityStatement
-- ⏳ Webhook system with HMAC signing + retry
-- ⏳ HL7 v2 ADT ingestion
+- ✅ `/fhir/r4/` read-only router (Patient, Practitioner, Appointment, Encounter, Observation, Condition, MedicationRequest, DiagnosticReport) — JWT auth, patient/doctor/admin scoped, replica routing, FHIR R4 JSON
+- ✅ CapabilityStatement at `GET /fhir/r4/metadata`
+- ✅ Webhook system: `webhooks` + `webhook_deliveries` tables (migration 009), HMAC-SHA256 signing (X-MediFlow-Signature), exponential backoff (1m/5m/30m/2h/8h, max 5 attempts), delivery worker, events: booking.created/cancelled, claim.submitted/paid, encounter.created
+- ✅ Admin webhook endpoints: POST/GET/DELETE /api/v1/admin/webhooks, GET /api/v1/admin/webhooks/{id}/deliveries
+- ✅ HL7 v2 ADT ingestion: `POST /hl7/adt` — ADT^A01 (admit/create patient) + ADT^A08 (update demographics), ACK AA/AE responses, admin-key secured
+- ✅ **137/137 tests passing** (48 new Phase 8 tests added)
 
 ---
 
@@ -184,4 +186,4 @@ make clean           # stop + remove volumes
 ```
 
 ## Next Migration
-Next file: `migrations/versions/009_*.py`
+Next file: `migrations/versions/010_*.py`
