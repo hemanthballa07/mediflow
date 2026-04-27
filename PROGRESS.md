@@ -194,6 +194,53 @@ Living source of truth. Reflects current project state at all times.
 
 ---
 
+## Roadmap — Not Started
+
+### Phase 10 — CI/CD + Production Infra ⏳
+**Priority: HIGH — do this before anything else ships**
+- GitHub Actions pipeline: lint (ruff) → pytest → docker build → push image on PR + merge to main
+- Kubernetes manifests (Deployment, Service, HPA, PodDisruptionBudget) or Helm chart
+- PgBouncer sidecar for DB connection pooling (critical at scale)
+- Secrets management: replace hardcoded JWT_SECRET/ADMIN_API_KEY with env injection (Vault or K8s secrets)
+- `docker-compose.prod.yml` override: no exposed ports except 8000, read-only filesystem, no-new-privileges
+- Data retention cron: archive bookings/audit_log rows older than 7 years (HIPAA minimum)
+
+### Phase 11 — Prior Authorization ⏳
+**Priority: HIGH — closes the billing loop**
+- `prior_auth_requests` table — linked to orders + claims; status machine: pending → approved | denied | pending_info | expired
+- `prior_auth_rules` table — payer_id + cpt_code combinations that require auth
+- Hook into `POST /claims` submit: if any line item CPT requires auth and no approved PA → 409 with detail
+- EDI 278 stub: `POST /admin/prior-auth/{id}/submit-edi` — serialize to X12 278 format (outbound only)
+- Endpoints: `POST /prior-auth`, `GET /prior-auth/{id}`, `PATCH /prior-auth/{id}/status`, `GET /patients/{id}/prior-auths`
+- Migration: `011_prior_auth.py`
+
+### Phase 12 — Analytics + Operational Reporting ⏳
+**Priority: MEDIUM**
+- Materialized views (refreshed hourly via pg_cron or worker): `mv_daily_occupancy`, `mv_revenue_by_department`, `mv_no_show_cohort`
+- Endpoints: `GET /admin/reports/revenue?from=&to=&department_id=`, `/admin/reports/utilization`, `/admin/reports/no-shows`
+- No-show risk score per patient (rolling 90-day rate) — stored on `users` or computed view
+- Grafana panels: revenue trend, occupancy heatmap, no-show rate by specialty
+- CSV export for all report endpoints (`Accept: text/csv` header)
+
+### Phase 13 — Patient Self-Service ⏳
+**Priority: MEDIUM**
+- Patient-initiated booking: currently doctor/admin creates encounters; patients can only book slots
+- Secure messaging: `messages` table (thread_id, sender_id, recipient_id, body, read_at); patient↔doctor threaded inbox
+- Care plan: `care_plans` + `care_plan_items` — discharge instructions, follow-up tasks, patient-visible
+- Patient health summary: `GET /patients/me/summary` — active problems, current meds, upcoming bookings, recent labs
+- Push notifications: FCM/APNS device token table, notification fan-out for appointment reminders
+
+### Phase 14 — Production Hardening ⏳
+**Priority: MEDIUM — needed before public launch**
+- OWASP API Top 10 audit pass: mass assignment check, object-level auth on every endpoint, rate limits on all write endpoints
+- Load test with realistic data: 10k patients, 100k bookings, 500k audit_log rows — verify query plans, add missing indexes
+- Penetration test checklist: JWT alg confusion, SSRF via webhook URLs, IDOR on patient IDs
+- Database backup + restore runbook (pg_dump, WAL archiving, point-in-time recovery test)
+- Disaster recovery runbook: failover steps, RTO/RPO targets documented
+- API versioning: `/api/v2/` prefix strategy, deprecation headers on v1 endpoints
+
+---
+
 ## Key Commands
 ```bash
 make up              # start all services (from worktree dir)
